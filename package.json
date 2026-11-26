@@ -1,0 +1,41 @@
+{
+  "name": "favicon-modder",
+  "version": "0.1.0",
+  "description": "Redraw the page favicon through small mods: recolour the logo, put a shape behind it, fade idle tabs.",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/favicon-modder.js",
+  "module": "./src/favicon-modder.js",
+  "browser": "./dist/favicon-modder.min.js",
+  "unpkg": "./dist/favicon-modder.min.js",
+  "jsdelivr": "./dist/favicon-modder.min.js",
+  "exports": {
+    ".": {
+      "import": "./src/favicon-modder.js",
+      "require": "./dist/favicon-modder.js"
+    },
+    "./dist/*": "./dist/*"
+  },
+  "files": [
+    "src",
+    "dist",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "sideEffects": false,
+  "keywords": [
+    "favicon",
+    "tab",
+    "icon",
+    "environment",
+    "recolor",
+    "idle",
+    "canvas",
+    "svg"
+  ],
+  "scripts": {
+    "build": "bun scripts/build.js",
+    "test": "bun test"
+  }
+}

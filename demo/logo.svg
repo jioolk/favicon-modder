@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <style>.tail { fill: #00b140; }</style>
+  <circle cx="30" cy="29" r="20" fill="none" stroke="#263238" stroke-width="9"/>
+  <path class="tail" d="M36 38 L50 34 L62 58 L48 62 Z"/>
+</svg>
