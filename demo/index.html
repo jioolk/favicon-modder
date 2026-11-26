@@ -10,7 +10,7 @@
     @media (prefers-color-scheme: dark) { :root { --bg: #15191d; --card: #1e2429; --ink: #e8ecef; --muted: #9aa6b1; --line: #33404a; --accent: #64a8f0; } }
     * { box-sizing: border-box; }
     body { margin: 0; padding: 24px 16px 48px; background: var(--bg); color: var(--ink); font: 15px/1.5 system-ui, sans-serif; }
-    main { max-width: 920px; margin: 0 auto; }
+    main { max-width: 1200px; margin: 0 auto; }
     h1 { font-size: 22px; margin: 0 0 4px; }
     p { margin: 0 0 12px; color: var(--muted); }
     code { font-size: 13px; }
@@ -29,6 +29,15 @@
     button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); font-weight: 600; }
     input[type="range"] { width: 120px; }
     .meter { font: 13px ui-monospace, monospace; color: var(--muted); text-align: center; }
+    h2 { font-size: 17px; margin: 28px 0 4px; }
+    .strip-wrap { overflow-x: auto; margin: 12px 0 0; }
+    .strip { display: grid; grid-template-columns: 120px repeat(16, 64px); gap: 6px 4px; align-items: center; min-width: max-content; }
+    .strip .head { font: 12px ui-monospace, monospace; color: var(--muted); text-align: center; }
+    .strip .name { font-size: 13px; font-weight: 600; }
+    .strip .name small { display: block; font-weight: 400; color: var(--muted); }
+    .strip img { display: block; margin: 0 auto; image-rendering: pixelated; }
+    .strip img.s32 { width: 64px; height: 64px; }
+    .strip img.s16 { width: 32px; height: 32px; }
   </style>
 </head>
 <body>
@@ -42,7 +51,7 @@
     <div class="card preview"><img id="p-local" src="logo.svg" alt=""><b>local</b><span>green, rounded</span></div>
     <div class="card preview"><img id="p-test" src="logo.svg" alt=""><b>test</b><span>blue tail, circle</span></div>
     <div class="card preview"><img id="p-prod" src="logo.svg" alt=""><b>production</b><span>red tail, square</span></div>
-    <div class="card preview"><img id="p-idle" src="logo.svg" alt=""><b>idle tab</b><span>custom mod, 70 % faded</span></div>
+    <div class="card preview"><img id="p-idle" src="logo.svg" alt=""><b>idle tab</b><span>custom mod, 70 % faded, tail kept</span></div>
   </div>
 
   <div class="card live">
@@ -81,6 +90,12 @@
         <button data-fade="icon">icon only</button>
         <button data-fade="background">background only</button>
       </div>
+      <div class="row"><span class="label">Fade keeps</span>
+        <button data-keep="tint">the tint</button>
+        <button data-keep="tint-bg">tint + background</button>
+        <button data-keep="half">tint at 50 %</button>
+        <button data-keep="none">nothing</button>
+      </div>
       <p>The fade here is fast (<code>step: 2, after: 30</code>). The tab in front of you never fades:
         switch to another tab or window for half a minute, then come back — it resets at once.</p>
       <div class="row"><span class="label">Pipeline</span>
@@ -89,6 +104,13 @@
       </div>
     </div>
   </div>
+
+  <h2>Fade strip — 0 to 15 minutes idle</h2>
+  <p>The default <code>fade()</code> (<code>step: 60, after: 900</code>), one icon per minute, frozen with the
+    <code>level</code> option. Each row is its own pipeline of the library; the fade keeps the instance tint:
+    the recoloured tail by default (<code>keep: 'recolored'</code>), local (no recolour) keeps its green marker
+    tail with <code>keep: ['#00b140']</code> and 60 % of its green background with <code>keepBackground: 0.6</code>. Drawn at 32 and 16 px, shown 2× without smoothing.</p>
+  <div class="strip-wrap"><div class="strip" id="strip"></div></div>
 </main>
 
 <script type="module">
@@ -99,13 +121,15 @@
   card('p-local').background('#e8f5e9', { shape: 'rounded', padding: 0.12 }).start();
   card('p-test').recolor('#00b140', '#1565c0').background('#e3f2fd', { shape: 'circle', padding: 0.16 }).start();
   card('p-prod').recolor('#00b140', '#d32f2f').background('#ffebee', { shape: 'square', padding: 0.1 }).start();
-  // a mod of your own: a fixed fade level, using the library's pixel helper
+  // a mod of your own: a fixed fade level, using the library's pixel helpers; it keeps the colours the
+  // recolours put into state.accents, as the built-in fade does
   const frozenFade = (level) => ({
     name: 'frozen-fade',
     canvas(ctx, state) {
-      for (const layer of [ctx, state.layers.background]) {
+      const colors = FaviconModder.resolveKeep('recolored', state.accents);
+      for (const [layer, keep] of [[ctx, { colors }], [state.layers.background, null]]) {
         const img = layer.getImageData(0, 0, state.size, state.size);
-        FaviconModder.fadePixels(img.data, level, { saturation: 0, brightness: 0.55 });
+        FaviconModder.fadePixels(img.data, level, { saturation: 0, brightness: 0.55 }, keep);
         layer.putImageData(img, 0, 0);
       }
     },
@@ -113,7 +137,13 @@
   card('p-idle').recolor('#00b140', '#d32f2f').background('#ffebee', { shape: 'square' }).use(frozenFade(0.7)).start();
 
   // the live panel drives this tab's own icon
-  const ui = { recolor: '', bg: '#e8f5e9', shape: 'rounded', padding: 0.1, opacity: 1, fade: 'off' };
+  const ui = { recolor: '', bg: '#e8f5e9', shape: 'rounded', padding: 0.1, opacity: 1, fade: 'off', keep: 'tint' };
+  const KEEP = {
+    tint: {},
+    'tint-bg': { keepBackground: true },
+    half: { keepStrength: 0.5 },
+    none: { keep: false },
+  };
   const fm = FaviconModder.create({ size: 64 });
 
   function apply() {
@@ -121,11 +151,12 @@
     if (ui.recolor) fm.recolor('#00b140', ui.recolor);
     fm.remove('background').remove('fade'); // keep the order recolor → background → fade
     if (ui.bg) fm.background(ui.bg, { shape: ui.shape, padding: ui.padding, opacity: ui.opacity });
-    if (ui.fade !== 'off') fm.fade({ step: 2, after: 30, target: ui.fade });
+    if (ui.fade !== 'off') fm.fade({ step: 2, after: 30, target: ui.fade, ...KEEP[ui.keep] });
     document.querySelectorAll('[data-recolor]').forEach((b) => b.setAttribute('aria-pressed', b.dataset.recolor === ui.recolor));
     document.querySelectorAll('[data-bg]').forEach((b) => b.setAttribute('aria-pressed', b.dataset.bg === ui.bg));
     document.querySelectorAll('[data-shape]').forEach((b) => b.setAttribute('aria-pressed', b.dataset.shape === ui.shape));
     document.querySelectorAll('[data-fade]').forEach((b) => b.setAttribute('aria-pressed', b.dataset.fade === ui.fade));
+    document.querySelectorAll('[data-keep]').forEach((b) => b.setAttribute('aria-pressed', b.dataset.keep === ui.keep));
   }
 
   // live setters: background() called again changes the existing mod in place
@@ -137,6 +168,7 @@
     if ('bg' in b.dataset) ui.bg = b.dataset.bg;
     if ('shape' in b.dataset) { ui.shape = b.dataset.shape; restyle(); apply(); return; }
     if ('fade' in b.dataset) ui.fade = b.dataset.fade;
+    if ('keep' in b.dataset) ui.keep = b.dataset.keep;
     if (b.id === 'stop') fm.stop();
     if (b.id === 'start') fm.start();
     apply();
@@ -161,11 +193,36 @@
       ? `fade ${Math.round(f.level * 100)} % · idle ${Math.round(f.idle() / 1000)} s` : 'fade: off';
   }, 500);
 
-  // ?recolor=%23d32f2f&bg=%23263238&shape=circle&fade=all presets the panel (handy for screenshots)
+  // ?recolor=%23d32f2f&bg=%23263238&shape=circle&fade=all&keep=tint presets the panel (handy for screenshots)
   const q = new URLSearchParams(location.search);
-  for (const k of ['recolor', 'bg', 'shape', 'fade']) if (q.has(k)) ui[k] = q.get(k);
+  for (const k of ['recolor', 'bg', 'shape', 'fade', 'keep']) if (q.has(k)) ui[k] = q.get(k);
   apply();
   fm.start();
+
+  // the fade strip: one pipeline per icon, the real fade mod frozen at the level of minute m
+  const ENVS = [
+    { name: 'local', note: 'green background', make: (p) => p.background('#43a047', { shape: 'rounded', padding: 0.1 }), fade: { keep: ['#00b140'], keepBackground: 0.6 } },
+    { name: 'production', note: 'red tail', make: (p) => p.recolor('#00b140', '#d32f2f').background('#ffebee', { shape: 'square', padding: 0.1 }), fade: {} },
+    { name: 'test', note: 'blue tail', make: (p) => p.recolor('#00b140', '#1565c0').background('#e3f2fd', { shape: 'circle', padding: 0.14 }), fade: {} },
+  ];
+  const strip = document.getElementById('strip');
+  const cell = (tag, cls, text) => Object.assign(document.createElement(tag), { className: cls, textContent: text || '' });
+  strip.append(cell('div', 'head'));
+  for (let m = 0; m < 16; m++) strip.append(cell('div', 'head', `${m} min`));
+  for (const env of ENVS) {
+    for (const size of [32, 16]) {
+      const name = cell('div', 'name', env.name);
+      name.append(cell('small', '', `${env.note} · ${size} px`));
+      strip.append(name);
+      for (let m = 0; m < 16; m++) {
+        const img = cell('img', `s${size}`);
+        img.alt = `${env.name}, ${m} min idle`;
+        strip.append(img);
+        const level = FaviconModder.fadeLevel(m * 60_000, { step: 60, after: 900 });
+        env.make(FaviconModder.create({ target: img, size, source: 'logo.svg' })).fade({ ...env.fade, level }).start();
+      }
+    }
+  }
 </script>
 </body>
 </html>

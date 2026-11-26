@@ -1,9 +1,9 @@
 /*!
- * favicon-modder 0.1.0 — redraw the page favicon through a pipeline of small mods.
+ * favicon-modder 0.2.0 — redraw the page favicon through a pipeline of small mods.
  * MIT licence. Copyright (c) 2026 the favicon-modder authors.
  */
 
-const VERSION = '0.1.0';
+const VERSION = '0.2.0';
 
 /* ------------------------------------------------------------------ colours */
 
@@ -180,16 +180,119 @@ function recolorPixels(data, from, to, tolerance = 32) {
   return data;
 }
 
+// hue (degrees) and chroma (0–255) of an RGB colour
+function hueChroma(r, g, b) {
+  const max = Math.max(r, g, b);
+  const c = max - Math.min(r, g, b);
+  if (!c) return [0, 0];
+  const h = max === r ? ((g - b) / c) % 6 : max === g ? (b - r) / c + 2 : (r - g) / c + 4;
+  return [(h * 60 + 360) % 360, c];
+}
+
+const HUE_FULL = 12; // degrees of hue difference that still count as the kept colour …
+const HUE_NONE = 30; // … falling off to nothing here
+const MIN_CHROMA = 24; // a kept colour greyer than this is matched by distance only
+
 /**
- * Grey and darken RGBA pixel data by `level` (0 = untouched, 1 = fully at `to`).
- * @param {Uint8ClampedArray} data @param {number} level @param {{saturation?: number, brightness?: number}} [to]
+ * Normalise the fade's `keep` option into parsed colours.
+ * @param {string|string[]|false|null} keep  colours; `'recolored'` (alone or inside the list) stands for
+ *   `accents`; `false`, `null` or `[]` keeps nothing
+ * @param {Array<string|RGBA>} [accents]  the `to` colours of the pipeline's recolours (`state.accents`)
+ * @returns {Array<RGBA & {h: number, c: number}>}
  */
-function fadePixels(data, level, to = {}) {
-  const sat = 1 - level * (1 - (to.saturation ?? 0));
-  const bright = 1 - level * (1 - (to.brightness ?? 0.55));
+function resolveKeep(keep, accents = []) {
+  if (keep == null || keep === false) return [];
+  const list = (Array.isArray(keep) ? keep : [keep]).flatMap((k) => (k === 'recolored' ? accents : [k]));
+  const out = [];
+  for (const k of list) {
+    const c = parseColor(k);
+    if (!c) throw new Error(`favicon-modder: not a colour: ${k}`);
+    const [h, ch] = hueChroma(c.r, c.g, c.b);
+    if (!out.some((o) => o.r === c.r && o.g === c.g && o.b === c.b)) out.push({ ...c, h, c: ch });
+  }
+  return out;
+}
+
+// the best kept colour for a pixel: [weight 0–1, the colour] (see keepWeight)
+function keepMatch(px, keep, tolerance) {
+  let best = 0;
+  let color = null;
+  let hc = null;
+  for (const k of keep) {
+    const d = Math.max(Math.abs(px.r - k.r), Math.abs(px.g - k.g), Math.abs(px.b - k.b));
+    if (d <= tolerance) return [1, k];
+    if (!tolerance) continue;
+    let w;
+    if (k.c >= MIN_CHROMA) {
+      hc = hc || hueChroma(px.r, px.g, px.b);
+      const dh = Math.abs(((hc[0] - k.h + 540) % 360) - 180);
+      const hw = dh <= HUE_FULL ? 1 : dh >= HUE_NONE ? 0 : 1 - (dh - HUE_FULL) / (HUE_NONE - HUE_FULL);
+      w = hw * Math.min(1, hc[1] / k.c);
+    } else w = d >= 2 * tolerance ? 0 : 1 - (d - tolerance) / tolerance;
+    if (w > best) { best = w; color = k; }
+  }
+  return [best, color];
+}
+
+/**
+ * How much a pixel "is" one of the kept colours, 0–1 — read as the share of that colour in the pixel:
+ * - within `tolerance` (the largest RGB channel difference) it is 1;
+ * - beyond it, for a kept colour with some chroma: a pixel of nearly the same hue (within 12°, falling to
+ *   0 at 30°) counts by its chroma relative to the kept colour's — an anti-aliased edge of the kept colour
+ *   over a grey, black or white neighbour has exactly that share of it;
+ * - for a near-grey kept colour: a linear falloff from `tolerance` to 2 × `tolerance`.
+ * `tolerance: 0` is an exact match only.
+ * @param {{r: number, g: number, b: number}} px @param {Array} keep  from `resolveKeep()`
+ * @param {number} [tolerance=48]
+ */
+function keepWeight(px, keep, tolerance = 48) { return keepMatch(px, keep, tolerance)[0]; }
+
+// grey and darken one colour by level l, into out[0..2]
+function fadeRgb(r, g, b, l, s0, b0, out) {
+  const sat = 1 - l * s0;
+  const bright = 1 - l * b0;
+  const grey = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  out[0] = (grey + (r - grey) * sat) * bright;
+  out[1] = (grey + (g - grey) * sat) * bright;
+  out[2] = (grey + (b - grey) * sat) * bright;
+  return out;
+}
+
+/**
+ * Grey and darken RGBA pixel data by `level` (0 = untouched, 1 = fully at `to`). With `keep`, the kept
+ * colours escape the fade (`strength` 1: entirely; 0.7: they fade by 30 % of `level` at most). A pixel that
+ * is only partly a kept colour (`keepWeight()` = w, an anti-aliased edge) is split into w of the kept
+ * colour and the rest; only the rest fades fully, so the edge keeps its colour and gets no grey halo.
+ * @param {Uint8ClampedArray} data @param {number} level @param {{saturation?: number, brightness?: number}} [to]
+ * @param {{colors: Array, tolerance?: number, strength?: number}|null} [keep]  colors from `resolveKeep()`
+ */
+function fadePixels(data, level, to = {}, keep = null) {
+  const s0 = 1 - (to.saturation ?? 0);
+  const b0 = 1 - (to.brightness ?? 0.55);
+  const colors = keep && keep.colors && keep.colors.length ? keep.colors : null;
+  const kept = level * (1 - clamp(keep?.strength ?? 1, 0, 1)); // the fade level of a kept colour
+  const tolerance = keep?.tolerance ?? 48;
+  const px = { r: 0, g: 0, b: 0 };
+  const a = [0, 0, 0];
+  const o = [0, 0, 0];
   for (let i = 0; i < data.length; i += 4) {
-    const grey = 0.2126 * data[i] + 0.7152 * data[i + 1] + 0.0722 * data[i + 2];
-    for (let c = 0; c < 3; c++) data[i + c] = (grey + (data[i + c] - grey) * sat) * bright;
+    if (!data[i + 3]) continue; // invisible
+    const r = data[i]; const g = data[i + 1]; const b = data[i + 2];
+    let w = 0;
+    let k = null;
+    if (colors) {
+      px.r = r; px.g = g; px.b = b;
+      [w, k] = keepMatch(px, colors, tolerance);
+    }
+    if (w >= 1) fadeRgb(r, g, b, kept, s0, b0, a); // the kept colour itself (as drawn)
+    else if (w > 0) {
+      // w of the kept colour k, (1 − w) of some other colour o: fade each by its own level
+      const rest = (v, kv) => clamp((v - w * kv) / (1 - w), 0, 255);
+      fadeRgb(k.r, k.g, k.b, kept, s0, b0, a);
+      fadeRgb(rest(r, k.r), rest(g, k.g), rest(b, k.b), level, s0, b0, o);
+      for (let c = 0; c < 3; c++) a[c] = w * a[c] + (1 - w) * o[c];
+    } else fadeRgb(r, g, b, level, s0, b0, a);
+    data[i] = a[0]; data[i + 1] = a[1]; data[i + 2] = a[2];
   }
   return data;
 }
@@ -260,6 +363,7 @@ function createTicker(onTick) {
 /**
  * @typedef {object} Mod
  * @property {string} [name]  used by `remove(name)` and the setters
+ * @property {function(object): void} [prepare]  before both stages, every render: e.g. add to `state.accents`
  * @property {function(Document, object): void} [svg]  vector stage: change the parsed SVG in place
  * @property {function(CanvasRenderingContext2D, object): void} [canvas]  raster stage: ctx is the icon layer
  * @property {function(Modder): void} [attach]  called on start (or on use() while running)
@@ -278,6 +382,7 @@ function recolor(from, to, opts = {}) {
     name: 'recolor',
     from,
     to,
+    prepare(state) { state.accents.push(to); }, // the fade keeps this colour (keep: 'recolored')
     svg(doc) { recolorSvgDoc(doc, from, to, opts.tolerance ?? 0); },
     canvas(ctx, state) {
       if (state.isSvg) return;
@@ -344,10 +449,17 @@ function background(color, opts = {}) {
 
 /**
  * Progressive idle fading: every `step` seconds the icon gets greyer and darker, reaching `to` at `after`
- * seconds of idle. Coming back to the tab resets it at once.
+ * seconds of idle. Coming back to the tab resets it at once. The instance tint survives: by default the
+ * colours the pipeline's recolours put in (`keep: 'recolored'`) do not fade.
  * @param {{step?: number, after?: number, easing?: string|function(number):number,
  *   to?: {saturation?: number, brightness?: number}, target?: 'all'|'background'|'icon',
- *   now?: function(): number}} [opts]  `now` is the clock (ms), for tests and demos
+ *   keep?: 'recolored'|string|string[]|false, tolerance?: number, keepStrength?: number,
+ *   keepBackground?: boolean|number, level?: number|null, now?: function(): number}} [opts]
+ *   `keep`: colours of the icon layer that the fade leaves ('recolored' = every recolor()'s `to`, also
+ *   inside a list; false / [] = fade everything); `tolerance`: their match distance (48, soft falloff to
+ *   2×); `keepStrength`: 0–1, how much of the fade a kept colour escapes (1 = stays full);
+ *   `keepBackground`: true (= keepStrength) or 0–1, the same for the whole background layer;
+ *   `level`: a frozen fade level instead of the idle clock (previews); `now`: the clock (ms), for tests
  * @returns {Mod & {set: function(object): void, level: number}}
  */
 function fade(opts = {}) {
@@ -361,8 +473,12 @@ function fade(opts = {}) {
     level: 0,
     options: {},
     set(o = {}) {
-      mod.options = { step: 60, after: 900, easing: 'linear', target: 'all', now: () => Date.now(), ...mod.options, ...o };
+      mod.options = {
+        step: 60, after: 900, easing: 'linear', target: 'all', keep: 'recolored', tolerance: 48, keepStrength: 1,
+        keepBackground: false, level: null, now: () => Date.now(), ...mod.options, ...o,
+      };
       mod.options.to = { saturation: 0, brightness: 0.55, ...mod.options.to };
+      resolveKeep(mod.options.keep, []); // fail early on a bad colour
       if (controller) mod.tick();
     },
     /** idle milliseconds */
@@ -371,10 +487,12 @@ function fade(opts = {}) {
       if (typeof document !== 'undefined' && document.visibilityState === 'visible' && document.hasFocus?.()) {
         last = mod.options.now(); // the tab in front of the user is never idle
       }
-      const level = fadeLevel(mod.idle(), mod.options);
+      const fixed = mod.options.level;
+      const level = fixed != null ? clamp(Number(fixed) || 0, 0, 1) : fadeLevel(mod.idle(), mod.options);
       if (level !== mod.level) { mod.level = level; controller?.redraw(); }
-      const next = nextFadeTick(mod.idle(), mod.options);
+      const next = fixed != null ? null : nextFadeTick(mod.idle(), mod.options);
       lastSchedule = mod.options.now();
+      if (controller && next != null && !ticker) ticker = createTicker(() => mod.tick()); // none for a frozen level
       ticker?.at(next ?? -1);
     },
     active() {
@@ -385,7 +503,6 @@ function fade(opts = {}) {
     attach(c) {
       controller = c;
       last = mod.options.now();
-      ticker = createTicker(() => mod.tick());
       document.addEventListener('visibilitychange', mod.active);
       for (const e of EVENTS) window.addEventListener(e, mod.active, { passive: true, capture: true });
       mod.tick();
@@ -399,12 +516,20 @@ function fade(opts = {}) {
     },
     canvas(ctx, state) {
       if (!mod.level) return;
-      const { target, to } = mod.options;
-      const layers = target === 'all' ? [state.layers.background, ctx] : [target === 'icon' ? ctx : state.layers.background];
-      for (const l of layers) {
-        const img = l.getImageData(0, 0, state.size, state.size);
-        fadePixels(img.data, mod.level, to);
-        l.putImageData(img, 0, 0);
+      const { target, to, keep, tolerance, keepStrength, keepBackground } = mod.options;
+      const run = (layer, level, k) => {
+        if (!level) return;
+        const img = layer.getImageData(0, 0, state.size, state.size);
+        fadePixels(img.data, level, to, k);
+        layer.putImageData(img, 0, 0);
+      };
+      if (target !== 'icon') {
+        const s = keepBackground === true ? keepStrength : Number(keepBackground) || 0;
+        run(state.layers.background, mod.level * (1 - clamp(s, 0, 1)));
+      }
+      if (target !== 'background') {
+        const colors = resolveKeep(keep, state.accents);
+        run(ctx, mod.level, colors.length ? { colors, tolerance, strength: keepStrength } : null);
       }
     },
   };
@@ -451,7 +576,9 @@ class Modder {
     this.mods = [];
     this.running = false;
     this.condition = true;
-    this.state = { size: this.options.size, isSvg: false, layers: null, controller: this, redraw: () => this.redraw() };
+    this.state = {
+      size: this.options.size, isSvg: false, layers: null, accents: [], controller: this, redraw: () => this.redraw(),
+    };
   }
 
   /** Add a mod at the end of the pipeline. @param {Mod} mod @returns {this} */
@@ -573,7 +700,8 @@ class Modder {
   async _render() {
     const src = await this._load();
     const { size } = this.options;
-    const state = Object.assign(this.state, { size, isSvg: src.svg != null });
+    const state = Object.assign(this.state, { size, isSvg: src.svg != null, accents: [] });
+    this.mods.forEach((m) => m.prepare?.(state));
     let img = src.image;
     if (state.isSvg) {
       const doc = new DOMParser().parseFromString(src.svg, 'image/svg+xml');
@@ -643,12 +771,12 @@ const FaviconModder = {
   version: VERSION, create, enabled, toggle, Modder,
   mods: { recolor, background, fade },
   parseColor, formatColor, colorMatcher, recolorCss, recolorSvgString, recolorSvgDoc,
-  recolorPixels, fadePixels, fadeLevel, nextFadeTick,
+  recolorPixels, fadePixels, resolveKeep, keepWeight, fadeLevel, nextFadeTick,
 };
 
 export default FaviconModder;
 export {
   VERSION as version, create, enabled, toggle, Modder, recolor, background, fade,
   parseColor, formatColor, colorMatcher, recolorCss, recolorSvgString, recolorSvgDoc,
-  recolorPixels, fadePixels, fadeLevel, nextFadeTick,
+  recolorPixels, fadePixels, resolveKeep, keepWeight, fadeLevel, nextFadeTick,
 };

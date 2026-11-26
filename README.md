@@ -13,7 +13,8 @@ the tabs look alike. With favicon-modder each instance draws its own icon from t
 - **local** green, **test** blue, **production** red — by recolouring a marker colour in the logo;
 - a coloured square, rounded square or circle behind a transparent logo;
 - **idle tabs fade** — a tab you have not looked at for a while turns grey and dark, step by step, and
-  is back in full colour the moment you return to it.
+  is back in full colour the moment you return to it. The instance tint stays: a faded production tab
+  still has its red tail, a faded test tab its blue one.
 
 It is meant as a per-user opt-in (developers, operators, managers who keep many tabs open), not something
 every visitor gets: when nothing is called, the page's favicon is left untouched.
@@ -23,7 +24,7 @@ every visitor gets: when nothing is called, the page's favicon is left untouched
 A script tag (a global `FaviconModder`):
 
 ```html
-<script src="https://cdn.jsdelivr.net/npm/favicon-modder@0.1.0/dist/favicon-modder.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/favicon-modder@0.2.0/dist/favicon-modder.min.js"></script>
 ```
 
 or an ES module:
@@ -116,6 +117,7 @@ fm.background(null);                      // gone
 
 ```js
 fm.fade({ step: 60, after: 900, easing: 'linear', to: { saturation: 0, brightness: 0.55 }, target: 'all' });
+fm.fade({ keep: 'recolored', tolerance: 48, keepStrength: 1, keepBackground: false });   // the defaults
 ```
 
 | option | default | |
@@ -125,6 +127,11 @@ fm.fade({ step: 60, after: 900, easing: 'linear', to: { saturation: 0, brightnes
 | `easing` | `'linear'` | `'linear'`, `'ease-in'`, `'ease-out'`, `'ease-in-out'` or a function `t → level` (0–1) |
 | `to` | `{ saturation: 0, brightness: 0.55 }` | the look at full fade |
 | `target` | `'all'` | `'all'`, `'icon'` (the logo only) or `'background'` (the shape only) |
+| `keep` | `'recolored'` | colours of the logo that do not fade: a colour, a list of colours, `'recolored'` (the `to` colour of every `recolor()` in the pipeline — also allowed inside a list), or `false` / `[]` to fade everything |
+| `tolerance` | `48` | how far (largest RGB channel difference, 0–255) a pixel may be from a kept colour and still count as it; `0` = exact only |
+| `keepStrength` | `1` | 0–1, how much of the fade a kept colour escapes: `1` it stays full, `0.7` it fades by 30 % at most, `0` it fades like the rest |
+| `keepBackground` | `false` | the same for the whole background shape: `true` (= `keepStrength`) or 0–1 |
+| `level` | `null` | a frozen fade level (0–1) instead of the idle clock — for previews and settings pages |
 
 **Idle** is the time since the tab was last in front of the user — visible and focused — or since the
 user last clicked, typed or scrolled in it (`visibilitychange`, `focus`, `pointerdown`, `keydown`,
@@ -137,6 +144,41 @@ to `setTimeout`, which browsers throttle in background tabs — the fade then mo
 
 The fade mod exposes `level` (0–1) and `idle()` (ms) for a status display, and takes a `now` option (a
 clock in ms) for tests and demos.
+
+#### The instance tint survives the fade
+
+By default the fade keeps the colours your recolours put in, so `.recolor('#00b140', '#d32f2f').fade()`
+leaves the red tail red while the rest of the icon goes grey — an old idle tab still tells which instance
+it is. How a pixel counts as a kept colour:
+
+- within `tolerance` of it: fully;
+- beyond, for a coloured kept colour: by hue — a pixel of nearly the same hue (within 12°, nothing past
+  30°) counts by its share of the kept colour's chroma. That is what an anti-aliased edge is: part tail,
+  part grey ring, white or transparent surroundings. The pixel is split into that share of the kept colour
+  and the rest; only the rest fades. The edges of the tail therefore keep their colour and get no grey
+  halo, at 32 and at 16 px;
+- for a near-grey kept colour (black, white): a linear falloff from `tolerance` to 2 × `tolerance`.
+
+Only the icon layer is matched; the background shape fades as a whole, by `keepBackground`.
+
+#### Recipe: an idle tab keeps its environment colour
+
+```js
+// production and test: a recoloured accent — nothing to add, the default keeps it
+FaviconModder.create().recolor('#00b140', '#d32f2f').background('#ffebee').fade().start();
+
+// an instance told apart by its background: keep the shape's colour (here 60 % of it, so idleness still shows)
+FaviconModder.create().background('#43a047').fade({ keepBackground: 0.6 }).start();
+
+// keep a colour that no recolour introduced (the logo's own green marker), at most 30 % faded
+FaviconModder.create().fade({ keep: ['#00b140'], keepStrength: 0.7 }).start();
+
+// the 0.1 look: everything goes grey
+FaviconModder.create().recolor('#00b140', '#d32f2f').fade({ keep: false }).start();
+```
+
+`keepBackground: true` with the default `keepStrength: 1` leaves the background exactly as it is, like
+`target: 'icon'`; a number in between keeps the colour recognisable while the tab still visibly ages.
 
 ### Opt-in per user
 
@@ -165,6 +207,7 @@ A mod is a plain object with any of these optional members:
 ```js
 const mod = {
   name: 'badge',                         // for remove('badge') / get('badge')
+  prepare(state) {},                     // every render, before both stages (e.g. add to state.accents)
   svg(doc, state) {},                    // vector stage: change the parsed SVG Document in place
   canvas(ctx, state) {},                 // raster stage: ctx is the icon layer (2D context, size × size)
   attach(controller) {},                 // start(): set up timers, listeners
@@ -173,9 +216,14 @@ const mod = {
 fm.use(mod);
 ```
 
-`state` carries `size`, `isSvg` (whether the source was an SVG), `controller`, `redraw()` and, during the
-raster stage, `layers: { icon, background }` — two 2D contexts that are composed at the end, the icon over
-the background. The built-in `recolor`, `background` and `fade` are mods of exactly this shape
+`state` carries `size`, `isSvg` (whether the source was an SVG), `controller`, `redraw()`, `accents` and,
+during the raster stage, `layers: { icon, background }` — two 2D contexts that are composed at the end, the
+icon over the background.
+
+`state.accents` is the list of colours that mark the instance, emptied at the start of every render. Each
+`recolor()` adds its `to` colour in `prepare()` — before the SVG stage, so the raster fade knows colours
+that were recoloured in the vector stage. The fade keeps them (`keep: 'recolored'`). A mod of your own
+adds to it the same way: `prepare(state) { state.accents.push('#ff6f00'); }`. The built-in `recolor`, `background` and `fade` are mods of exactly this shape
 (`FaviconModder.mods.*`).
 
 A dot for unread messages:
@@ -200,8 +248,13 @@ A mod that changes itself over time asks for a redraw through `state.redraw()` (
 in `attach`). Redraws are coalesced.
 
 The pure helpers the built-in mods use are exported too: `parseColor`, `formatColor`, `colorMatcher`,
-`recolorCss`, `recolorSvgString`, `recolorSvgDoc`, `recolorPixels`, `fadePixels`, `fadeLevel`,
-`nextFadeTick`.
+`recolorCss`, `recolorSvgString`, `recolorSvgDoc`, `recolorPixels`, `fadePixels`, `resolveKeep`,
+`keepWeight`, `fadeLevel`, `nextFadeTick`. A fade of your own that keeps the tint:
+
+```js
+const colors = FaviconModder.resolveKeep('recolored', state.accents);
+FaviconModder.fadePixels(img.data, 0.7, { saturation: 0, brightness: 0.55 }, { colors, tolerance: 48, strength: 1 });
+```
 
 ## Browser notes and limits
 
@@ -227,7 +280,8 @@ docker run --rm -v "$PWD":/w -w /w oven/bun bun test              # unit tests
 docker run --rm -v "$PWD":/w -w /w oven/bun bun scripts/build.js  # dist/ (UMD + minified)
 ```
 
-`demo/index.html` shows every mod with live controls; serve the project folder over HTTP (ES modules do not
+`demo/index.html` shows every mod with live controls and a fade strip (0–15 minutes idle, one icon a
+minute, for three instances at 32 and 16 px); serve the project folder over HTTP (ES modules do not
 load from `file://`) and open `/demo/`.
 
 ## Licence

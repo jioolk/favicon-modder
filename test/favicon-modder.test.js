@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import FaviconModder, {
   create, parseColor, formatColor, recolorCss, recolorSvgString, recolorSvgDoc, recolorPixels, fadePixels,
-  fadeLevel, nextFadeTick, recolor, background, fade,
+  resolveKeep, keepWeight, fadeLevel, nextFadeTick, recolor, background, fade,
 } from '../src/favicon-modder.js';
 
 describe('parseColor', () => {
@@ -103,6 +103,92 @@ describe('pixels', () => {
     expect(full[0]).toBe(full[1]);
     expect(full[0]).toBe(Math.round(0.2126 * 255 * 0.5));
     expect(full[3]).toBe(255);
+  });
+});
+
+describe('fade keeps the instance tint', () => {
+  const red = resolveKeep(['#d32f2f']);
+  const sat = (d) => Math.max(d[0], d[1], d[2]) - Math.min(d[0], d[1], d[2]);
+  test('resolveKeep: "recolored" stands for the accents, also inside a list; false / [] / null keep nothing', () => {
+    expect(resolveKeep('recolored', ['#d32f2f', '#1565c0']).map(formatColor)).toEqual(['#d32f2f', '#1565c0']);
+    expect(resolveKeep(['recolored', 'navy'], ['#d32f2f', '#d32f2f']).map(formatColor)).toEqual(['#d32f2f', '#000080']);
+    expect(resolveKeep(false, ['#d32f2f'])).toEqual([]);
+    expect(resolveKeep([], ['#d32f2f'])).toEqual([]);
+    expect(resolveKeep(null)).toEqual([]);
+    expect(() => resolveKeep(['nope'])).toThrow();
+    expect(() => fade({ keep: ['nope'] })).toThrow();
+  });
+  test('keepWeight: full within tolerance, soft falloff to 2x, nothing beyond', () => {
+    expect(keepWeight({ r: 211, g: 47, b: 47 }, red)).toBe(1);
+    expect(keepWeight({ r: 211 - 48, g: 47, b: 47 }, red, 48)).toBe(1);
+    // a near-grey kept colour falls off by distance, linearly to 2x tolerance
+    expect(keepWeight({ r: 72, g: 72, b: 72 }, resolveKeep('#000'), 48)).toBeCloseTo(0.5);
+    expect(keepWeight({ r: 96, g: 96, b: 96 }, resolveKeep('#000'), 48)).toBe(0);
+    // a chromatic one by hue and the share of its chroma: a darker red is mostly red, a rose half of it
+    expect(keepWeight({ r: 161, g: 36, b: 36 }, red)).toBeCloseTo(125 / 164, 2);
+    expect(keepWeight({ r: 21, g: 101, b: 192 }, red)).toBe(0); // blue is not red
+    expect(keepWeight({ r: 21, g: 101, b: 192 }, red)).toBe(0); // blue is not red
+    expect(keepWeight({ r: 128, g: 128, b: 128 }, red)).toBe(0); // grey is not red
+    expect(keepWeight({ r: 200, g: 60, b: 60 }, red, 0)).toBe(0); // tolerance 0: exact only
+    expect(keepWeight({ r: 211, g: 47, b: 47 }, red, 0)).toBe(1);
+  });
+  test('keepWeight: an anti-aliased edge over grey, black or white keeps its share of colour', () => {
+    const mix = (a, b, t) => ({ r: a[0] * t + b[0] * (1 - t), g: a[1] * t + b[1] * (1 - t), b: a[2] * t + b[2] * (1 - t) });
+    for (const other of [[38, 50, 56], [0, 0, 0], [255, 255, 255], [128, 128, 128]]) {
+      expect(keepWeight(mix([211, 47, 47], other, 0.5), red)).toBeGreaterThan(0.4);
+      expect(keepWeight(mix([211, 47, 47], other, 0.8), red)).toBeGreaterThan(0.75);
+      expect(keepWeight(mix([211, 47, 47], other, 0.1), red)).toBeLessThan(0.25);
+    }
+  });
+  test('fadePixels with keep: the kept colour stays, the rest goes grey, edges in between', () => {
+    const d = new Uint8ClampedArray([211, 47, 47, 255, 0, 177, 64, 255, 125, 49, 52, 255, 211, 47, 47, 0]);
+    const out = fadePixels(d.slice(), 1, { saturation: 0, brightness: 0.55 }, { colors: red });
+    expect([...out.slice(0, 4)]).toEqual([211, 47, 47, 255]); // the tail, untouched
+    expect(sat(out.slice(4, 8))).toBe(0); // the green is grey
+    const edge = out.slice(8, 12);
+    // a half red, half dark edge keeps its red share: about as colourful as before, no grey halo
+    expect(sat(edge)).toBeGreaterThan(70);
+    expect(sat(edge)).toBeLessThan(sat([125, 49, 52]) + 8);
+    expect([...out.slice(12)]).toEqual([211, 47, 47, 0]);
+  });
+  test('keepStrength: 0.7 lets the kept colour fade by 30 % at most', () => {
+    const px = new Uint8ClampedArray([211, 47, 47, 255]);
+    const at = (level, strength) => fadePixels(px.slice(), level, {}, { colors: red, strength });
+    expect([...at(1, 0.7)]).toEqual([...fadePixels(px.slice(), 0.3)]);
+    expect([...at(1, 0)]).toEqual([...fadePixels(px.slice(), 1)]);
+    expect([...at(0.5, 1)]).toEqual([211, 47, 47, 255]);
+  });
+  test('the defaults: keep "recolored", tolerance 48, strength 1, background fades', () => {
+    expect(fade().options).toMatchObject({ keep: 'recolored', tolerance: 48, keepStrength: 1, keepBackground: false, level: null });
+    expect(fade({ keep: false }).options.keep).toBe(false);
+  });
+  test('recolor mods fill state.accents in prepare()', () => {
+    const fm = create().recolor('#00b140', '#d32f2f').recolor('#263238', '#000').fade();
+    const state = { accents: [] };
+    fm.mods.forEach((m) => m.prepare?.(state));
+    expect(state.accents).toEqual(['#d32f2f', '#000']);
+  });
+  test('the fade mod on fake layers: accents kept by default, all faded with keep: false, background by keepBackground', () => {
+    const layer = (rgba) => {
+      const data = new Uint8ClampedArray(rgba);
+      return { getImageData: () => ({ data }), putImageData() {}, data };
+    };
+    const runFade = (opts) => {
+      const icon = layer([211, 47, 47, 255, 0, 177, 64, 255]);
+      const bg = layer([46, 125, 50, 255]);
+      const m = fade(opts);
+      m.level = 1;
+      m.canvas(icon, { size: 1, accents: ['#d32f2f'], layers: { icon, background: bg } });
+      return { icon: [...icon.data], bg: [...bg.data] };
+    };
+    const def = runFade({});
+    expect(def.icon.slice(0, 4)).toEqual([211, 47, 47, 255]);
+    expect(sat(def.icon.slice(4))).toBe(0);
+    expect(sat(def.bg)).toBe(0);
+    expect(sat(runFade({ keep: false }).icon)).toBe(0);
+    expect(runFade({ keepBackground: true }).bg).toEqual([46, 125, 50, 255]);
+    expect(sat(runFade({ keepBackground: 0.5 }).bg)).toBeGreaterThan(20);
+    expect(runFade({ target: 'background' }).icon.slice(4)).toEqual([0, 177, 64, 255]);
   });
 });
 

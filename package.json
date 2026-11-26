@@ -1,6 +1,6 @@
 {
   "name": "favicon-modder",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Redraw the page favicon through small mods: recolour the logo, put a shape behind it, fade idle tabs.",
   "license": "MIT",
   "type": "module",
