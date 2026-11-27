@@ -3,223 +3,234 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>favicon-modder demo</title>
+  <title>favicon-modder playground</title>
   <link rel="icon" href="logo.svg">
   <style>
-    :root { color-scheme: light dark; --bg: #f6f7f9; --card: #fff; --ink: #1d2329; --muted: #5f6b76; --line: #d9dee3; --accent: #1565c0; }
-    @media (prefers-color-scheme: dark) { :root { --bg: #15191d; --card: #1e2429; --ink: #e8ecef; --muted: #9aa6b1; --line: #33404a; --accent: #64a8f0; } }
+    :root { color-scheme: light dark; --bg: #f3f5f7; --card: #fff; --ink: #1d2329; --muted: #5f6b76; --line: #d9dee3; --accent: #1565c0; --code: #f6f8fa; }
+    @media (prefers-color-scheme: dark) { :root { --bg: #14181c; --card: #1c2227; --ink: #e6eaee; --muted: #9aa6b1; --line: #33404a; --accent: #7cb4f5; --code: #232b31; } }
     * { box-sizing: border-box; }
-    body { margin: 0; padding: 24px 16px 48px; background: var(--bg); color: var(--ink); font: 15px/1.5 system-ui, sans-serif; }
-    main { max-width: 1200px; margin: 0 auto; }
-    h1 { font-size: 22px; margin: 0 0 4px; }
-    p { margin: 0 0 12px; color: var(--muted); }
-    code { font-size: 13px; }
-    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin: 16px 0 24px; }
-    .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 14px; }
-    .card.preview { text-align: center; }
-    .card.preview img { width: 64px; height: 64px; image-rendering: auto; display: block; margin: 4px auto 8px; }
-    .card.preview b { display: block; font-size: 13px; }
-    .card.preview span { font-size: 12px; color: var(--muted); }
-    .live { display: grid; grid-template-columns: 160px 1fr; gap: 20px; align-items: start; }
-    @media (max-width: 640px) { .live { grid-template-columns: 1fr; } }
-    .big { width: 128px; height: 128px; display: block; margin: 0 auto 8px; background: repeating-conic-gradient(#0001 0 25%, transparent 0 50%) 0 0 / 16px 16px; border-radius: 8px; }
-    .row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 0 0 12px; }
-    .row > .label { width: 96px; font-weight: 600; font-size: 13px; }
-    button { font: inherit; font-size: 13px; padding: 4px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--card); color: var(--ink); cursor: pointer; }
+    body { margin: 0; padding: 28px 16px 56px; background: var(--bg); color: var(--ink); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+    main { max-width: 1120px; margin: 0 auto; }
+    header { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; margin: 0 0 8px; }
+    header img { width: 44px; height: 44px; }
+    header h1 { font-size: 24px; margin: 0; flex: 1; letter-spacing: -.01em; }
+    header h1 small { display: block; font-size: 14px; font-weight: 400; color: var(--muted); letter-spacing: 0; }
+    .lang { display: flex; gap: 4px; }
+    button { font: inherit; font-size: 13px; padding: 5px 11px; border: 1px solid var(--line); border-radius: 6px; background: var(--card); color: var(--ink); cursor: pointer; }
+    button:hover { border-color: var(--accent); }
     button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); font-weight: 600; }
-    input[type="range"] { width: 120px; }
-    .meter { font: 13px ui-monospace, monospace; color: var(--muted); text-align: center; }
-    h2 { font-size: 17px; margin: 28px 0 4px; }
-    .strip-wrap { overflow-x: auto; margin: 12px 0 0; }
-    .strip { display: grid; grid-template-columns: 120px repeat(16, 64px); gap: 6px 4px; align-items: center; min-width: max-content; }
-    .strip .head { font: 12px ui-monospace, monospace; color: var(--muted); text-align: center; }
+    h2 { font-size: 17px; margin: 32px 0 4px; }
+    p { margin: 0 0 12px; color: var(--muted); max-width: 80ch; }
+    code { font: 13px ui-monospace, monospace; }
+    .presets { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; margin: 14px 0 0; }
+    .preset { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 14px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+    .preset-head { display: flex; gap: 12px; align-items: center; }
+    .preset-head img { width: 48px; height: 48px; flex: none; }
+    .preset-head b { display: block; }
+    .preset-head span { font-size: 13px; color: var(--muted); }
+    .preset pre { margin: 0; flex: 1; padding: 8px 10px; background: var(--code); border-radius: 6px; font: 11.5px/1.5 ui-monospace, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .preset .actions { display: flex; gap: 6px; }
+    #configurator { margin: 14px 0 0; }
+    .strip-wrap { overflow-x: auto; margin: 12px 0 0; background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 12px; }
+    .strip { display: grid; grid-template-columns: 120px repeat(16, 40px); gap: 6px 4px; align-items: center; min-width: max-content; }
+    .strip .head { font: 11px ui-monospace, monospace; color: var(--muted); text-align: center; }
     .strip .name { font-size: 13px; font-weight: 600; }
     .strip .name small { display: block; font-weight: 400; color: var(--muted); }
-    .strip img { display: block; margin: 0 auto; image-rendering: pixelated; }
-    .strip img.s32 { width: 64px; height: 64px; }
-    .strip img.s16 { width: 32px; height: 32px; }
+    .strip img { display: block; margin: 0 auto; width: 32px; height: 32px; }
+    .strip img.s16 { width: 16px; height: 16px; image-rendering: pixelated; }
+    footer { margin: 32px 0 0; font-size: 13px; color: var(--muted); }
+    footer a { color: var(--accent); }
   </style>
 </head>
 <body>
 <main>
-  <h1>favicon-modder</h1>
-  <p>One logo (<code>logo.svg</code>, its tail is the marker colour <code>#00b140</code>), redrawn per instance.
-    The cards below are separate pipelines drawing into an <code>&lt;img&gt;</code>; the panel drives this tab's own icon.</p>
-
-  <div class="grid">
-    <div class="card preview"><img src="logo.svg" alt=""><b>original</b><span>untouched</span></div>
-    <div class="card preview"><img id="p-local" src="logo.svg" alt=""><b>local</b><span>green, rounded</span></div>
-    <div class="card preview"><img id="p-test" src="logo.svg" alt=""><b>test</b><span>blue tail, circle</span></div>
-    <div class="card preview"><img id="p-prod" src="logo.svg" alt=""><b>production</b><span>red tail, square</span></div>
-    <div class="card preview"><img id="p-idle" src="logo.svg" alt=""><b>idle tab</b><span>custom mod, 70 % faded, tail kept</span></div>
-  </div>
-
-  <div class="card live">
-    <div>
-      <img id="big" class="big" alt="this tab's icon">
-      <div class="meter" id="meter">fade: off</div>
+  <header>
+    <img src="logo.svg" alt="">
+    <h1>favicon-modder <small data-i18n="tagline">One logo, a tab icon per instance — recoloured, on a shape, fading while idle.</small></h1>
+    <div class="lang" role="group" aria-label="Language">
+      <button type="button" data-lang="en">English</button>
+      <button type="button" data-lang="cs">Čeština</button>
     </div>
-    <div>
-      <div class="row"><span class="label">Recolor</span>
-        <button data-recolor="">none</button>
-        <button data-recolor="#d32f2f">red</button>
-        <button data-recolor="#1565c0">blue</button>
-        <button data-recolor="#f9a825">amber</button>
-      </div>
-      <div class="row"><span class="label">Background</span>
-        <button data-bg="">none</button>
-        <button data-bg="#e8f5e9">mint</button>
-        <button data-bg="#2e7d32">green</button>
-        <button data-bg="#ffebee">pink</button>
-        <button data-bg="#263238">dark</button>
-      </div>
-      <div class="row"><span class="label">Shape</span>
-        <button data-shape="square">square</button>
-        <button data-shape="rounded">rounded</button>
-        <button data-shape="circle">circle</button>
-      </div>
-      <div class="row"><span class="label">Padding</span>
-        <input id="padding" type="range" min="0" max="0.3" step="0.01" value="0.1"> <span id="padding-v">0.10</span>
-      </div>
-      <div class="row"><span class="label">Opacity</span>
-        <input id="opacity" type="range" min="0" max="1" step="0.05" value="1"> <span id="opacity-v">1.00</span>
-      </div>
-      <div class="row"><span class="label">Fade</span>
-        <button data-fade="off">off</button>
-        <button data-fade="all">all</button>
-        <button data-fade="icon">icon only</button>
-        <button data-fade="background">background only</button>
-      </div>
-      <div class="row"><span class="label">Fade keeps</span>
-        <button data-keep="tint">the tint</button>
-        <button data-keep="tint-bg">tint + background</button>
-        <button data-keep="half">tint at 50 %</button>
-        <button data-keep="none">nothing</button>
-      </div>
-      <p>The fade here is fast (<code>step: 2, after: 30</code>). The tab in front of you never fades:
-        switch to another tab or window for half a minute, then come back — it resets at once.</p>
-      <div class="row"><span class="label">Pipeline</span>
-        <button id="stop">stop (restore the icon)</button>
-        <button id="start">start</button>
-      </div>
-    </div>
-  </div>
+  </header>
 
-  <h2>Fade strip — 0 to 15 minutes idle</h2>
-  <p>The default <code>fade()</code> (<code>step: 60, after: 900</code>), one icon per minute, frozen with the
-    <code>level</code> option. Each row is its own pipeline of the library; the fade keeps the instance tint:
-    the recoloured tail by default (<code>keep: 'recolored'</code>), local (no recolour) keeps its green marker
-    tail with <code>keep: ['#00b140']</code> and 60 % of its green background with <code>keepBackground: 0.6</code>. Drawn at 32 and 16 px, shown 2× without smoothing.</p>
+  <h2 data-i18n="presets">Presets</h2>
+  <p data-i18n="presetsHelp">Each card is a JSON config drawn with <code>FaviconModder.fromConfig()</code>. Options that are left out take their defaults. Load one into the configurator to change it.</p>
+  <div class="presets" id="presets"></div>
+
+  <h2 data-i18n="configurator">Configurator</h2>
+  <p data-i18n="configuratorHelp">This is <code>FaviconModderUI.mount()</code>. It drives this tab's own icon and remembers the config in this browser. Switch to another tab for a while to see the real fade — the idle preset fades in 30 seconds.</p>
+  <div id="configurator"></div>
+
+  <h2 data-i18n="strip">The fade, minute by minute</h2>
+  <p data-i18n="stripHelp">The default fade (a step a minute, fully faded at 15 minutes) for three presets, frozen with <code>preview()</code>. The instance colour stays.</p>
   <div class="strip-wrap"><div class="strip" id="strip"></div></div>
+
+  <footer>favicon-modder <span id="version"></span> · MIT · <a href="https://github.com/jioolk/favicon-modder">github.com/jioolk/favicon-modder</a></footer>
 </main>
 
 <script type="module">
   import FaviconModder from '../src/favicon-modder.js';
+  import FaviconModderUI from '../src/favicon-modder-ui.js';
 
-  // the static cards: one pipeline each, drawing into an <img> instead of the tab icon
-  const card = (id) => FaviconModder.create({ target: document.getElementById(id), size: 128 });
-  card('p-local').background('#e8f5e9', { shape: 'rounded', padding: 0.12 }).start();
-  card('p-test').recolor('#00b140', '#1565c0').background('#e3f2fd', { shape: 'circle', padding: 0.16 }).start();
-  card('p-prod').recolor('#00b140', '#d32f2f').background('#ffebee', { shape: 'square', padding: 0.1 }).start();
-  // a mod of your own: a fixed fade level, using the library's pixel helpers; it keeps the colours the
-  // recolours put into state.accents, as the built-in fade does
-  const frozenFade = (level) => ({
-    name: 'frozen-fade',
-    canvas(ctx, state) {
-      const colors = FaviconModder.resolveKeep('recolored', state.accents);
-      for (const [layer, keep] of [[ctx, { colors }], [state.layers.background, null]]) {
-        const img = layer.getImageData(0, 0, state.size, state.size);
-        FaviconModder.fadePixels(img.data, level, { saturation: 0, brightness: 0.55 }, keep);
-        layer.putImageData(img, 0, 0);
-      }
+  const PRESETS = [
+    {
+      id: 'local', name: { en: 'local', cs: 'lokální' }, note: { en: 'green background', cs: 'zelené pozadí' },
+      config: {
+        version: 1, enabled: true,
+        mods: [
+          { type: 'background', color: '#43a047', shape: 'rounded', padding: 0.1 },
+          { type: 'fade', keep: ['#00b140'], keepBackground: 0.6 },
+        ],
+      },
+    },
+    {
+      id: 'test', name: { en: 'test', cs: 'test' }, note: { en: 'blue tail, circle', cs: 'modrý ocásek, kruh' },
+      config: {
+        version: 1, enabled: true,
+        mods: [
+          { type: 'recolor', from: '#00b140', to: '#1565c0' },
+          { type: 'background', color: '#e3f2fd', shape: 'circle', padding: 0.14 },
+          { type: 'fade' },
+        ],
+      },
+    },
+    {
+      id: 'production', name: { en: 'production', cs: 'produkce' }, note: { en: 'red tail, square', cs: 'červený ocásek, čtverec' },
+      config: {
+        version: 1, enabled: true,
+        mods: [
+          { type: 'recolor', from: '#00b140', to: '#d32f2f' },
+          { type: 'background', color: '#ffebee', shape: 'square', padding: 0.1 },
+          { type: 'fade' },
+        ],
+      },
+    },
+    {
+      id: 'idle', name: { en: 'idle (fast)', cs: 'nečinná (rychle)' }, note: { en: 'fades in 30 s — shown at 70 %', cs: 'vybledne za 30 s — zde na 70 %' },
+      preview: 0.7,
+      config: {
+        version: 1, enabled: true,
+        mods: [
+          { type: 'recolor', from: '#00b140', to: '#d32f2f' },
+          { type: 'background', color: '#ffebee', shape: 'square', padding: 0.1 },
+          { type: 'fade', step: 2, after: 30 },
+        ],
+      },
+    },
+  ];
+
+  const TEXT = {
+    cs: {
+      tagline: 'Jedno logo, pro každou instanci vlastní ikona karty — přebarvená, na tvaru, při nečinnosti bledne.',
+      presets: 'Předvolby',
+      presetsHelp: 'Každá karta je konfigurace v JSON vykreslená přes FaviconModder.fromConfig(). Vynechané volby mají výchozí hodnoty. Načtěte ji do konfigurátoru a upravte.',
+      configurator: 'Konfigurátor',
+      configuratorHelp: 'Tohle je FaviconModderUI.mount(). Řídí ikonu této karty a pamatuje si konfiguraci v tomto prohlížeči. Přepněte na chvíli na jinou kartu a uvidíte skutečné blednutí — předvolba „nečinná“ vybledne za 30 sekund.',
+      strip: 'Blednutí minutu po minutě',
+      stripHelp: 'Výchozí blednutí (krok za minutu, plně vybledlá po 15 minutách) pro tři předvolby, zmrazené přes preview(). Barva instance zůstává.',
+      load: 'Načíst do konfigurátoru',
+      copy: 'Kopírovat',
+      copied: 'Zkopírováno',
+    },
+    en: { load: 'Load into the configurator', copy: 'Copy', copied: 'Copied' },
+  };
+
+  const q = new URLSearchParams(location.search);
+  let lang = q.get('lang') || (navigator.language || 'en').slice(0, 2);
+  if (!['en', 'cs'].includes(lang)) lang = 'en';
+  const tx = (key, fallback) => TEXT[lang]?.[key] ?? TEXT.en[key] ?? fallback;
+  document.getElementById('version').textContent = FaviconModder.version;
+
+  // the stored config (or a preset from ?preset=…), drawn into this tab's icon
+  const store = FaviconModderUI.localStorageStore('favicon-modder-playground');
+  const presetOf = (id) => PRESETS.find((p) => p.id === id);
+  const initial = presetOf(q.get('preset'))?.config || store.load() || presetOf('production').config;
+  const tab = FaviconModder.fromConfig(initial).start();
+
+  const ui = FaviconModderUI.mount(document.getElementById('configurator'), {
+    config: initial,
+    defaults: presetOf('production').config,
+    source: 'logo.svg',
+    locale: lang,
+    tabTitle: 'favicon-modder',
+    onChange(config) {
+      tab.setConfig(config); // the host's job: apply …
+      store.save(config); // … and store
+      window.lastConfig = config; // (for the automated checks)
     },
   });
-  card('p-idle').recolor('#00b140', '#d32f2f').background('#ffebee', { shape: 'square' }).use(frozenFade(0.7)).start();
+  window.playground = { ui, tab };
 
-  // the live panel drives this tab's own icon
-  const ui = { recolor: '', bg: '#e8f5e9', shape: 'rounded', padding: 0.1, opacity: 1, fade: 'off', keep: 'tint' };
-  const KEEP = {
-    tint: {},
-    'tint-bg': { keepBackground: true },
-    half: { keepStrength: 0.5 },
-    none: { keep: false },
+  // the preset cards
+  const el = (tag, props = {}, ...kids) => {
+    const e = Object.assign(document.createElement(tag), props);
+    e.append(...kids);
+    return e;
   };
-  const fm = FaviconModder.create({ size: 64 });
-
-  function apply() {
-    fm.remove('recolor');
-    if (ui.recolor) fm.recolor('#00b140', ui.recolor);
-    fm.remove('background').remove('fade'); // keep the order recolor → background → fade
-    if (ui.bg) fm.background(ui.bg, { shape: ui.shape, padding: ui.padding, opacity: ui.opacity });
-    if (ui.fade !== 'off') fm.fade({ step: 2, after: 30, target: ui.fade, ...KEEP[ui.keep] });
-    document.querySelectorAll('[data-recolor]').forEach((b) => b.setAttribute('aria-pressed', b.dataset.recolor === ui.recolor));
-    document.querySelectorAll('[data-bg]').forEach((b) => b.setAttribute('aria-pressed', b.dataset.bg === ui.bg));
-    document.querySelectorAll('[data-shape]').forEach((b) => b.setAttribute('aria-pressed', b.dataset.shape === ui.shape));
-    document.querySelectorAll('[data-fade]').forEach((b) => b.setAttribute('aria-pressed', b.dataset.fade === ui.fade));
-    document.querySelectorAll('[data-keep]').forEach((b) => b.setAttribute('aria-pressed', b.dataset.keep === ui.keep));
+  // JSON with one mod per line: short enough to read on a card
+  function compact(config) {
+    const { mods, ...top } = config;
+    const head = Object.entries(top).map(([k, v]) => `${JSON.stringify(k)}: ${JSON.stringify(v)}`).join(', ');
+    const lines = mods.map((m) => `    ${JSON.stringify(m).replace(/,"/g, ', "').replace(/":/g, '": ').replace(/^\{/, '{ ').replace(/\}$/, ' }')}`);
+    return `{\n  ${head},\n  "mods": [\n${lines.join(',\n')}\n  ]\n}`;
   }
 
-  // live setters: background() called again changes the existing mod in place
-  const restyle = () => ui.bg && fm.background(ui.bg, { shape: ui.shape, padding: ui.padding, opacity: ui.opacity });
-  document.addEventListener('click', (e) => {
-    const b = e.target.closest('button');
-    if (!b) return;
-    if ('recolor' in b.dataset) ui.recolor = b.dataset.recolor;
-    if ('bg' in b.dataset) ui.bg = b.dataset.bg;
-    if ('shape' in b.dataset) { ui.shape = b.dataset.shape; restyle(); apply(); return; }
-    if ('fade' in b.dataset) ui.fade = b.dataset.fade;
-    if ('keep' in b.dataset) ui.keep = b.dataset.keep;
-    if (b.id === 'stop') fm.stop();
-    if (b.id === 'start') fm.start();
-    apply();
-  });
-  for (const id of ['padding', 'opacity']) {
-    document.getElementById(id).addEventListener('input', (e) => {
-      ui[id] = Number(e.target.value);
-      document.getElementById(`${id}-v`).textContent = ui[id].toFixed(2);
-      restyle();
-    });
+  function renderPresets() {
+    const box = document.getElementById('presets');
+    box.replaceChildren();
+    for (const p of PRESETS) {
+      const img = el('img', { alt: '' });
+      const json = compact(p.config);
+      const load = el('button', { type: 'button', textContent: tx('load') });
+      load.addEventListener('click', () => {
+        ui.setConfig(p.config);
+        tab.setConfig(p.config);
+        store.save(FaviconModder.normalizeConfig(p.config).config);
+        document.getElementById('configurator').scrollIntoView({ behavior: 'smooth', block: 'start' });
+      });
+      const copy = el('button', { type: 'button', textContent: tx('copy') });
+      copy.addEventListener('click', async () => {
+        try { await navigator.clipboard.writeText(json); copy.textContent = tx('copied'); } catch { /* blocked */ }
+        setTimeout(() => { copy.textContent = tx('copy'); }, 1500);
+      });
+      box.append(el('section', { className: 'preset', id: `preset-${p.id}` },
+        el('div', { className: 'preset-head' }, img, el('div', {}, el('b', { textContent: p.name[lang] }), el('span', { textContent: p.note[lang] }))),
+        el('pre', { textContent: json }),
+        el('div', { className: 'actions' }, load, copy)));
+      const ctl = FaviconModder.fromConfig(p.config, { target: img, source: 'logo.svg', size: 96 });
+      if (p.preview != null) ctl.preview(p.preview);
+      ctl.start();
+    }
   }
 
-  // mirror the tab icon into the big preview
-  const link = document.querySelector('link[rel~="icon"]');
-  const big = document.getElementById('big');
-  const mirror = () => { big.src = link.href; };
-  new MutationObserver(mirror).observe(link, { attributes: true, attributeFilter: ['href'] });
-  mirror();
-  setInterval(() => {
-    const f = fm.get('fade');
-    document.getElementById('meter').textContent = f && fm.running
-      ? `fade ${Math.round(f.level * 100)} % · idle ${Math.round(f.idle() / 1000)} s` : 'fade: off';
-  }, 500);
+  function applyLanguage() {
+    document.documentElement.lang = lang;
+    for (const n of document.querySelectorAll('[data-i18n]')) {
+      n.dataset.en ??= n.innerHTML;
+      n.innerHTML = lang === 'en' ? n.dataset.en : tx(n.dataset.i18n, n.dataset.en);
+    }
+    document.querySelectorAll('[data-lang]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.lang === lang)));
+    renderPresets();
+    ui.setLocale(lang);
+  }
+  document.querySelectorAll('[data-lang]').forEach((b) => b.addEventListener('click', () => { lang = b.dataset.lang; applyLanguage(); }));
+  applyLanguage();
 
-  // ?recolor=%23d32f2f&bg=%23263238&shape=circle&fade=all&keep=tint presets the panel (handy for screenshots)
-  const q = new URLSearchParams(location.search);
-  for (const k of ['recolor', 'bg', 'shape', 'fade', 'keep']) if (q.has(k)) ui[k] = q.get(k);
-  apply();
-  fm.start();
-
-  // the fade strip: one pipeline per icon, the real fade mod frozen at the level of minute m
-  const ENVS = [
-    { name: 'local', note: 'green background', make: (p) => p.background('#43a047', { shape: 'rounded', padding: 0.1 }), fade: { keep: ['#00b140'], keepBackground: 0.6 } },
-    { name: 'production', note: 'red tail', make: (p) => p.recolor('#00b140', '#d32f2f').background('#ffebee', { shape: 'square', padding: 0.1 }), fade: {} },
-    { name: 'test', note: 'blue tail', make: (p) => p.recolor('#00b140', '#1565c0').background('#e3f2fd', { shape: 'circle', padding: 0.14 }), fade: {} },
-  ];
+  // the fade strip: one pipeline per icon, each frozen at minute m of the default 15-minute fade
   const strip = document.getElementById('strip');
-  const cell = (tag, cls, text) => Object.assign(document.createElement(tag), { className: cls, textContent: text || '' });
+  const cell = (tag, cls, text) => el(tag, { className: cls, textContent: text || '' });
   strip.append(cell('div', 'head'));
-  for (let m = 0; m < 16; m++) strip.append(cell('div', 'head', `${m} min`));
-  for (const env of ENVS) {
+  for (let m = 0; m < 16; m++) strip.append(cell('div', 'head', `${m}′`));
+  for (const p of PRESETS.slice(0, 3)) {
     for (const size of [32, 16]) {
-      const name = cell('div', 'name', env.name);
-      name.append(cell('small', '', `${env.note} · ${size} px`));
+      const name = cell('div', 'name', p.name.en);
+      name.append(cell('small', '', `${size} px`));
       strip.append(name);
       for (let m = 0; m < 16; m++) {
         const img = cell('img', `s${size}`);
-        img.alt = `${env.name}, ${m} min idle`;
+        img.alt = `${p.name.en}, ${m} min idle`;
         strip.append(img);
-        const level = FaviconModder.fadeLevel(m * 60_000, { step: 60, after: 900 });
-        env.make(FaviconModder.create({ target: img, size, source: 'logo.svg' })).fade({ ...env.fade, level }).start();
+        FaviconModder.fromConfig(p.config, { target: img, size, source: 'logo.svg' }).preview(m / 15).start();
       }
     }
   }
