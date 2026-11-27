@@ -1,4 +1,4 @@
 node_modules/
-dist/.min-entry.js
+dist/.min-entry*.js
 *.log
 .DS_Store
