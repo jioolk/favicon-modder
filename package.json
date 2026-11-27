@@ -1,8 +1,17 @@
 {
   "name": "favicon-modder",
-  "version": "0.2.0",
-  "description": "Redraw the page favicon through small mods: recolour the logo, put a shape behind it, fade idle tabs.",
+  "version": "0.3.0",
+  "description": "Redraw the page favicon through small mods: recolour the logo, put a shape behind it, fade idle tabs. A JSON config per user and a drop-in configurator UI.",
   "license": "MIT",
+  "author": "jioolk",
+  "homepage": "https://github.com/jioolk/favicon-modder#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jioolk/favicon-modder.git"
+  },
+  "bugs": {
+    "url": "https://github.com/jioolk/favicon-modder/issues"
+  },
   "type": "module",
   "main": "./dist/favicon-modder.js",
   "module": "./src/favicon-modder.js",
@@ -13,6 +22,10 @@
     ".": {
       "import": "./src/favicon-modder.js",
       "require": "./dist/favicon-modder.js"
+    },
+    "./ui": {
+      "import": "./src/favicon-modder-ui.js",
+      "require": "./dist/favicon-modder-ui.js"
     },
     "./dist/*": "./dist/*"
   },
@@ -32,7 +45,9 @@
     "recolor",
     "idle",
     "canvas",
-    "svg"
+    "svg",
+    "configurator",
+    "settings"
   ],
   "scripts": {
     "build": "bun scripts/build.js",

@@ -2,6 +2,40 @@
 
 0.x releases make no compatibility promise; any of them may change the API.
 
+## 0.3.0 — 2026-11-27
+
+A JSON config per user, and a configurator that is drawn from the mods themselves.
+
+- **Configs.** `FaviconModder.fromConfig(json, opts)` builds a controller from
+  `{ version, enabled, size, mods: [{ type, ...options }] }`; `controller.toConfig()` writes one back (also
+  for a pipeline built in code); `controller.setConfig(json)` applies one live (stops on `enabled: false`,
+  starts again on true). `normalizeConfig()` checks one (defaults for missing or invalid values) and
+  `defaultConfig()` gives a starting point.
+- Unknown mod types and options are not applied, reported in one `console.warn`, and **kept** by
+  `toConfig()`, so an older app does not erase what a newer one stored. A newer config version is read as far
+  as understood.
+- Config `version` (`FaviconModder.configVersion` = 1) with a migration hook: `registerMigration(from, fn)`.
+- **Mod registry.** `registerMod(type, factory, schema)`, `modSchema(type)`, `modTypes()`. Each option has a
+  self-describing schema (type `color` | `number` | `select` | `boolean` | `colorList` | `text`, default,
+  limits, label / help with message keys, group, `when`, `advanced`). `recolor`, `background` and `fade` are
+  registered the same way; their mods now carry `type` and `toConfig()`.
+- `controller.preview(time)` and the mod hook `preview(time)`: freeze the fade at 0–1 of its course, stepped
+  like the real one (previews, the configurator).
+- A running controller marks the original icon on the `<link>` (`data-favicon-modder-source`); a second
+  controller and the configurator draw from that, not from the already drawn icon.
+- **New file `favicon-modder-ui.js`** (`dist/favicon-modder-ui.js` / `.min.js`, `favicon-modder/ui`): the
+  configurator. `FaviconModderUI.mount(el, { config, onChange, locale, messages, preview, source,
+  allowedMods, defaults, theme })` → `{ getConfig, setConfig, setLocale, destroy }`. Renders only from the
+  registry: enable switch, size, mods with add / remove / reorder and "More options", live preview with an
+  idle slider and a fade strip, reset to defaults, copy JSON. Shadow DOM, themable with `--fmui-*` custom
+  properties, light / dark / auto. English and Czech built in; `addMessages(locale, messages)`,
+  `createTranslator()`; `localStorageStore(key)`. The core does not depend on it.
+- `demo/` is now a playground on the configurator: preset cards with their JSON, the configurator driving
+  the tab's icon, the fade strip; `?preset=` and `?lang=`.
+- README rewritten with pictures (`docs/img/`); file headers and `package.json` name the author (jioolk)
+  and the repository.
+- The build makes both bundles and prints their gzip sizes.
+
 ## 0.2.0 — 2026-11-26
 
 The fade keeps the instance tint: a fully faded icon still shows which instance it is.

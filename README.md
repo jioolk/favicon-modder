@@ -1,275 +1,337 @@
 # favicon-modder
 
-Redraw a page's favicon through a short pipeline of small, optional **mods**: recolour part of the logo,
-put a shape behind it, fade the icon while the tab sits idle. No dependencies; one file.
+<p align="center"><img src="docs/img/hero.png" width="880" alt="A browser tab bar: the same app open locally (green), on test (blue) and in production (red); the idle tabs are greyed but keep their colour"></p>
 
-> **Version 0.x — no compatibility promise.** The API may change in any 0.x release. Pin the exact version.
+Redraw a page's favicon through a short pipeline of small **mods** — recolour part of the logo, put a shape
+behind it, fade the icon while the tab sits idle — from **one JSON config per user**, with a **drop-in
+configurator** to edit it. No dependencies, no build step, no framework.
+
+> **Version 0.x — no compatibility promise.** The API and the config format may change in any 0.x release.
+> Pin the exact version. (Stored configs carry a `version` and are migrated forward, see below.)
 
 ## Why
 
-Orientation with many tabs open. The same app runs locally, on a test server and in production, and all
-the tabs look alike. With favicon-modder each instance draws its own icon from the one logo:
+Orientation with many tabs open. The same app runs locally, on a test server and in production, and the
+tabs all look alike. With favicon-modder each instance draws its own icon from the one logo:
 
-- **local** green, **test** blue, **production** red — by recolouring a marker colour in the logo;
+- **local green, test blue, production red** — by recolouring a marker colour in the logo;
 - a coloured square, rounded square or circle behind a transparent logo;
-- **idle tabs fade** — a tab you have not looked at for a while turns grey and dark, step by step, and
-  is back in full colour the moment you return to it. The instance tint stays: a faded production tab
-  still has its red tail, a faded test tab its blue one.
+- **idle tabs fade** — a tab you have not looked at for a while turns grey and dark, step by step, and is
+  back in full colour the moment you return. **The instance colour stays**: a faded production tab still
+  has its red tail, so even the oldest tab tells you where it points.
 
 It is meant as a per-user opt-in (developers, operators, managers who keep many tabs open), not something
-every visitor gets: when nothing is called, the page's favicon is left untouched.
+every visitor gets: when nothing is configured, the page's favicon is left untouched.
 
-## Install
+<p align="center"><img src="docs/img/fade.gif" width="624" alt="Animation: three instance icons fade from 0 to 15 minutes idle; the green, blue and red tails stay"></p>
 
-A script tag (a global `FaviconModder`):
+## Quick start
+
+A script tag (a global `FaviconModder`) and three lines:
 
 ```html
-<script src="https://cdn.jsdelivr.net/npm/favicon-modder@0.2.0/dist/favicon-modder.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/favicon-modder@0.3.0/dist/favicon-modder.min.js"></script>
+<script>
+  FaviconModder.fromConfig({
+    mods: [{ type: 'recolor', from: '#00b140', to: '#d32f2f' }, { type: 'background', color: '#ffebee' }, { type: 'fade' }],
+  }).start();
+</script>
 ```
 
 or an ES module:
 
 ```js
-import FaviconModder from 'favicon-modder';               // via a bundler / npm
-import FaviconModder from './vendor/favicon-modder.js';   // or copy src/favicon-modder.js
+import FaviconModder from 'favicon-modder';                 // npm / a bundler
+import FaviconModder from './vendor/favicon-modder.js';     // or a copy of src/favicon-modder.js
+
+FaviconModder.fromConfig(JSON.parse(localStorage.getItem('favicon') || 'null') ?? FaviconModder.defaultConfig()).start();
 ```
 
-`dist/favicon-modder.js` is a UMD build (global, CommonJS or AMD); `src/favicon-modder.js` is the ES module.
+The same pipeline can be built in code: `FaviconModder.create().recolor('#00b140', '#d32f2f').background('#ffebee').fade().start()`.
 
-## Quick start
+Files: `src/*.js` are ES modules; `dist/*.js` are UMD builds (global, CommonJS or AMD) and `dist/*.min.js`
+their minified twins. The configurator is a separate file, `favicon-modder-ui.js` (below); the core does not
+need it.
 
-```js
-const fm = FaviconModder.create({ source: 'auto', size: 64 })
-  .recolor('#00b140', '#d32f2f')                            // the green marker becomes red
-  .background('#ffebee', { shape: 'rounded', padding: 0.12 })
-  .fade({ step: 60, after: 900 })                           // greyer every minute, fully faded at 15 min
-  .start();
+## The mods
 
-fm.redraw();          // draw again (mods call this themselves when they change)
-fm.remove('fade');    // drop a mod, by name or by the mod object
-fm.stop();            // detach everything and put the original icon back
+Mods run in config order; the configurator keeps the fade last so it fades what the others drew.
+
+### recolor — one logo, a colour per instance
+
+<img src="docs/img/recolor.png" width="600" alt="The logo with its green tail, then recoloured red, blue, amber, purple and slate">
+
+```json
+{ "type": "recolor", "from": "#00b140", "to": "#d32f2f", "tolerance": null }
 ```
 
-Mods run in the order they were added. Put `fade()` last so it fades what the others drew.
-
-## The API
-
-### `FaviconModder.create(options)` → controller
-
-| option | default | |
-|---|---|---|
-| `source` | `'auto'` | `'auto'` = the href of the page's `<link rel="icon">` (or `/favicon.ico` when there is none); or any URL, data URL included |
-| `size` | `64` | output size in pixels (square) |
-| `target` | the page's icon link | where the result goes: a `<link>` gets its `href`, an `<img>` its `src` |
-
-Nothing changes until `start()`. The result is written as a PNG data URL on the first `<link rel~="icon">`
-(one is created when the page has none). `stop()` restores its original `href` and `type` (or removes the
-link it created).
-
-Controller methods (all chainable except `get` and `redraw`):
-
-| method | |
-|---|---|
-| `recolor(from, to, opts)` | add a recolour; several calls stack |
-| `background(color, opts)` | set the background; calling it again changes it live; `background(null)` removes it |
-| `fade(opts)` | set idle fading; calling it again changes it live; `fade(false)` removes it |
-| `use(mod)` | add any mod at the end of the pipeline |
-| `remove(modOrName)` | remove that mod object, or every mod with that name |
-| `get(name)` | the first mod with that name |
-| `onlyIf(boolOrFn)` | `start()` does nothing unless this is true (a function is asked at `start()`) |
-| `start()` / `stop()` | take over / give back the icon |
-| `redraw()` | draw again; coalesced, returns a promise |
-
-### recolor — replace a colour of the logo
-
-```js
-fm.recolor('#00b140', '#1565c0');                    // exact match (SVG)
-fm.recolor('rgb(0 177 64)', 'navy', { tolerance: 10 });
-fm.recolor('#00b140', '#d32f2f').recolor('#263238', '#000');   // stacked
-```
+Draw the part that varies in a marker colour that appears nowhere else in the logo — chroma green
+`#00b140` is a good choice — and recolour that per instance. Several recolours stack.
 
 - **SVG sources** are recoloured in the SVG itself, before it is rasterised: the `fill`, `stroke`,
-  `stop-color`, `flood-color`, `lighting-color` and `color` attributes, `style="…"` attributes and the
-  CSS inside `<style>`. Every notation is understood and compared as a colour — `#rgb`, `#rgba`,
-  `#rrggbb`, `#rrggbbaa`, `rgb()`/`rgba()`, `hsl()`/`hsla()`, named colours. The match is **exact by
-  default**; `tolerance` (0–255) allows that much difference per RGB channel. The source alpha is kept.
-- **Raster sources** (PNG, ICO, …) get a pixel swap on the canvas, with `tolerance` 32 by default.
-
-Tip: draw the part you want to vary in a fixed marker colour that appears nowhere else in the logo —
-chroma green `#00b140` is a good choice — and recolour that per instance.
+  `stop-color`, `flood-color`, `lighting-color` and `color` attributes, `style="…"` and `<style>` CSS. Every
+  notation is compared as a colour — `#rgb`, `#rrggbbaa`, `rgb()`, `hsl()`, named colours.
+- **Raster sources** (PNG, ICO) get a pixel swap on the canvas.
+- `tolerance` (0–255 per RGB channel): `null` = automatic — exact for SVG, 32 for raster icons.
 
 ### background — a shape behind a transparent icon
 
-```js
-fm.background('#2e7d32', { shape: 'rounded', radius: 0.22, padding: 0.1, opacity: 1 });
-fm.background('#b71c1c');                 // later: the colour changes live, the options stay
-fm.background(null);                      // gone
+<img src="docs/img/background.png" width="555" alt="The logo on a rounded square, a more rounded square, a circle, a square, a dark square with a recoloured logo, and a half-transparent circle">
+
+```json
+{ "type": "background", "color": "#e8f5e9", "shape": "rounded", "radius": 0.22, "padding": 0.1, "opacity": 1 }
 ```
 
 | option | default | |
 |---|---|---|
-| `shape` | `'rounded'` | `'square'`, `'rounded'` or `'circle'` |
-| `radius` | `0.22` | corner radius of `'rounded'`, as a fraction of the size |
-| `padding` | `0.1` | the icon shrinks by this fraction on every side to fit inside the shape |
+| `color` | `#e8f5e9` | any CSS colour |
+| `shape` | `rounded` | `square`, `rounded` or `circle` |
+| `radius` | `0.22` | corner radius of `rounded`, a fraction of the size |
+| `padding` | `0.1` | the icon shrinks by this fraction on every side |
 | `opacity` | `1` | of the shape only |
 
-### fade — idle tabs turn grey and dark
+### fade — idle tabs turn grey and dark, and keep their tint
 
-```js
-fm.fade({ step: 60, after: 900, easing: 'linear', to: { saturation: 0, brightness: 0.55 }, target: 'all' });
-fm.fade({ keep: 'recolored', tolerance: 48, keepStrength: 1, keepBackground: false });   // the defaults
+<img src="docs/img/strip.png" width="784" alt="Three rows of icons, one per minute from 0 to 15 minutes idle: the backgrounds go grey, the coloured tails stay">
+
+```json
+{ "type": "fade", "step": 60, "after": 900, "easing": "linear", "target": "all",
+  "keep": ["recolored"], "keepBackground": 0, "saturation": 0, "brightness": 0.55,
+  "tolerance": 48, "keepStrength": 1 }
 ```
 
 | option | default | |
 |---|---|---|
 | `step` | `60` | seconds between two fade steps |
 | `after` | `900` | seconds of idle until the fade is complete |
-| `easing` | `'linear'` | `'linear'`, `'ease-in'`, `'ease-out'`, `'ease-in-out'` or a function `t → level` (0–1) |
-| `to` | `{ saturation: 0, brightness: 0.55 }` | the look at full fade |
-| `target` | `'all'` | `'all'`, `'icon'` (the logo only) or `'background'` (the shape only) |
-| `keep` | `'recolored'` | colours of the logo that do not fade: a colour, a list of colours, `'recolored'` (the `to` colour of every `recolor()` in the pipeline — also allowed inside a list), or `false` / `[]` to fade everything |
-| `tolerance` | `48` | how far (largest RGB channel difference, 0–255) a pixel may be from a kept colour and still count as it; `0` = exact only |
-| `keepStrength` | `1` | 0–1, how much of the fade a kept colour escapes: `1` it stays full, `0.7` it fades by 30 % at most, `0` it fades like the rest |
-| `keepBackground` | `false` | the same for the whole background shape: `true` (= `keepStrength`) or 0–1 |
-| `level` | `null` | a frozen fade level (0–1) instead of the idle clock — for previews and settings pages |
+| `easing` | `linear` | `linear`, `ease-in`, `ease-out`, `ease-in-out` |
+| `target` | `all` | `all`, `icon` (the logo only) or `background` (the shape only) |
+| `saturation`, `brightness` | `0`, `0.55` | the look at full fade |
+| `keep` | `["recolored"]` | colours of the logo that do not fade; `"recolored"` stands for the `to` of every recolour; `[]` fades everything |
+| `keepBackground` | `0` | 0–1: how much of the background colour stays (`0.6` keeps a green "local" shape recognisable) |
+| `tolerance` | `48` | how far a pixel may be from a kept colour and still count as it (anti-aliased edges are split, so the tail gets no grey halo) |
+| `keepStrength` | `1` | 0–1: how much of the fade a kept colour escapes |
 
-**Idle** is the time since the tab was last in front of the user — visible and focused — or since the
-user last clicked, typed or scrolled in it (`visibilitychange`, `focus`, `pointerdown`, `keydown`,
-`scroll`, `wheel`; passive listeners). The tab in front of you never fades. Coming back resets the icon to
-full colour at once.
+**Idle** is the time since the tab was last in front of the user — visible and focused — or since they last
+clicked, typed or scrolled in it. The tab in front of you never fades; coming back resets it at once. The
+step timer runs in a tiny inline Web Worker so background-tab throttling does not stall it (with a
+`setTimeout` fallback where workers are blocked by a CSP).
 
-The step timer runs in a tiny inline Web Worker (a Blob URL) so that background-tab timer throttling does
-not stall it. Where workers are blocked (a CSP without `worker-src blob:`, sandboxed frames) it falls back
-to `setTimeout`, which browsers throttle in background tabs — the fade then moves in coarser steps.
+## The config
 
-The fade mod exposes `level` (0–1) and `idle()` (ms) for a status display, and takes a `now` option (a
-clock in ms) for tests and demos.
+One plain JSON object — what you store per person:
 
-#### The instance tint survives the fade
-
-By default the fade keeps the colours your recolours put in, so `.recolor('#00b140', '#d32f2f').fade()`
-leaves the red tail red while the rest of the icon goes grey — an old idle tab still tells which instance
-it is. How a pixel counts as a kept colour:
-
-- within `tolerance` of it: fully;
-- beyond, for a coloured kept colour: by hue — a pixel of nearly the same hue (within 12°, nothing past
-  30°) counts by its share of the kept colour's chroma. That is what an anti-aliased edge is: part tail,
-  part grey ring, white or transparent surroundings. The pixel is split into that share of the kept colour
-  and the rest; only the rest fades. The edges of the tail therefore keep their colour and get no grey
-  halo, at 32 and at 16 px;
-- for a near-grey kept colour (black, white): a linear falloff from `tolerance` to 2 × `tolerance`.
-
-Only the icon layer is matched; the background shape fades as a whole, by `keepBackground`.
-
-#### Recipe: an idle tab keeps its environment colour
-
-```js
-// production and test: a recoloured accent — nothing to add, the default keeps it
-FaviconModder.create().recolor('#00b140', '#d32f2f').background('#ffebee').fade().start();
-
-// an instance told apart by its background: keep the shape's colour (here 60 % of it, so idleness still shows)
-FaviconModder.create().background('#43a047').fade({ keepBackground: 0.6 }).start();
-
-// keep a colour that no recolour introduced (the logo's own green marker), at most 30 % faded
-FaviconModder.create().fade({ keep: ['#00b140'], keepStrength: 0.7 }).start();
-
-// the 0.1 look: everything goes grey
-FaviconModder.create().recolor('#00b140', '#d32f2f').fade({ keep: false }).start();
+```json
+{
+  "version": 1,
+  "enabled": true,
+  "size": 64,
+  "mods": [
+    { "type": "recolor", "from": "#00b140", "to": "#1565c0" },
+    { "type": "background", "color": "#e3f2fd", "shape": "circle", "padding": 0.14 },
+    { "type": "fade", "after": 600 }
+  ]
+}
 ```
 
-`keepBackground: true` with the default `keepStrength: 1` leaves the background exactly as it is, like
-`target: 'icon'`; a number in between keeps the colour recognisable while the tab still visibly ages.
-
-### Opt-in per user
-
 ```js
-FaviconModder.create()
-  .recolor('#00b140', '#d32f2f')
-  .fade()
-  .onlyIf(FaviconModder.enabled())     // a localStorage switch, key 'favicon-modder'
-  .start();
-
-// a settings checkbox
-checkbox.checked = FaviconModder.enabled();
-checkbox.addEventListener('change', () => { FaviconModder.toggle('favicon-modder', checkbox.checked); location.reload(); });
+const fm = FaviconModder.fromConfig(config, { source: 'auto' });   // a controller; nothing changes yet
+fm.start();              // draws (a no-op with "enabled": false)
+fm.setConfig(next);      // live: redraws, stops on enabled: false, starts again on true
+fm.toConfig();           // back to JSON — also for a pipeline built in code
+fm.stop();               // the original icon is back
 ```
 
-- `FaviconModder.enabled(key = 'favicon-modder')` — true when localStorage holds `1`, `true` or `on`
-  under that key; false when storage is blocked.
-- `FaviconModder.toggle(key = 'favicon-modder', on?)` — flips the switch (or sets it to `on`) and
-  returns the new state.
-- `onlyIf(fn | boolean)` — combine it with anything else: a role, an environment, a query parameter.
+- **Left-out options take their defaults**; an invalid value (a colour that is not one, a number out of
+  range) falls back to the default. `FaviconModder.normalizeConfig(json)` returns `{ config, warnings }`
+  without building anything; `FaviconModder.defaultConfig()` is a fade-only starting point.
+- **Forward and backward tolerant.** An unknown mod type or option is not applied and is reported in one
+  `console.warn` — but it is **kept** by `toConfig()`, so an app on an older library version does not erase
+  what a newer one stored.
+- **Versioned.** `version` is the config format (`FaviconModder.configVersion`, now 1). A config without one
+  is taken as current; an older one passes through the registered migrations:
+  `FaviconModder.registerMigration(1, (config) => upgradedToVersion2)`.
+- `fromConfig(config, opts)` takes the `create()` options: `source` (`'auto'` = the page's
+  `<link rel="icon">`, or a URL), `size` (overrides the config's), `target` (a `<link>` or an `<img>`).
+- `fm.preview(time)` freezes time-dependent mods at a point of their course (0–1 of the fade's `after`),
+  for previews; `preview(null)` gives them their clock back.
+
+## The configurator
+
+<p align="center"><img src="docs/img/config.png" width="900" alt="The configurator: a live preview with an idle slider and a fade strip on the left, the mods with their fields on the right, reset and copy JSON at the bottom"></p>
+
+`favicon-modder-ui.js` renders an editor for that JSON — embed it in a settings page of every app and keep
+one config per person. It is **drawn entirely from the mod registry**: when you upgrade the library and a
+new mod or option appears, it appears in the configurator too, with no change to your app.
+
+```html
+<script src="https://cdn.jsdelivr.net/npm/favicon-modder@0.3.0/dist/favicon-modder.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/favicon-modder@0.3.0/dist/favicon-modder-ui.min.js"></script>
+<div id="favicon-settings"></div>
+<script>
+  const store = FaviconModderUI.localStorageStore('favicon');          // { load(), save(config), clear() }
+  const tab = FaviconModder.fromConfig(store.load() ?? FaviconModder.defaultConfig()).start();
+
+  FaviconModderUI.mount(document.getElementById('favicon-settings'), {
+    config: store.load(),
+    onChange(config) { store.save(config); tab.setConfig(config); },   // store it, and show it on this tab
+  });
+</script>
+```
+
+Storing on your server instead (debounce: `onChange` fires on every slider move):
+
+```js
+let timer;
+FaviconModderUI.mount(el, {
+  config: await (await fetch('/me/favicon-config')).json(),
+  onChange(config) {
+    clearTimeout(timer);
+    timer = setTimeout(() => fetch('/me/favicon-config', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(config),
+    }), 500);
+  },
+});
+```
+
+`mount(element, options)` → `{ getConfig(), setConfig(config), setLocale(locale), destroy(), root }`
+
+| option | default | |
+|---|---|---|
+| `config` | `defaults` | the config to edit |
+| `onChange(config)` | — | called with the full, checked JSON after every edit; storing it is the host app's job |
+| `defaults` | `FaviconModder.defaultConfig()` | what "Reset to defaults" restores |
+| `locale` | `<html lang>`, else the browser's | `'en'`, `'cs'`, or any language added with `addMessages()` |
+| `messages` | — | `{ key: text }` overrides for this instance |
+| `preview` | `true` | the live preview: 64 px, a fake tab at 16 px, an idle slider (0–100 % of the fade) and a six-step strip |
+| `source` | the page's icon | the icon to preview (a running controller marks the original on the link, so the preview never draws a drawn icon) |
+| `allowedMods` | all | mod types the "Add" menu offers, e.g. `['recolor', 'fade']` |
+| `theme` | `'auto'` | `'auto'` (follows `prefers-color-scheme`), `'light'` or `'dark'` |
+| `title`, `tabTitle` | — | the heading and the fake tab's text |
+
+What it shows: an on/off switch (`enabled`), the icon size, one card per mod (move up / down, remove,
+"More options" for the rarely needed ones), an "Add" menu, **Reset to defaults**, **Copy JSON** and the JSON
+itself. `setConfig()` shows another config without calling `onChange`.
+
+**Styling.** It lives in a Shadow DOM — nothing leaks in or out. Theme it with CSS custom properties on the
+host element: `--fmui-accent`, `--fmui-bg`, `--fmui-fg`, `--fmui-border`, `--fmui-muted`, `--fmui-panel`,
+`--fmui-radius`, `--fmui-font`. Native controls, labels on every field, a keyboard-operable switch,
+`aria-live` status messages.
+
+```css
+#favicon-settings { --fmui-accent: #8e24aa; --fmui-radius: 4px; }
+```
+
+### Languages
+
+<img src="docs/img/config-cs-dark.png" width="450" align="right" alt="The configurator in Czech, dark theme">
+
+English and Czech are built in. Add a language, or change a few words:
+
+```js
+FaviconModderUI.addMessages('de', {
+  'ui.reset': 'Zurücksetzen', 'ui.copy': 'JSON kopieren',
+  'mod.fade': 'Ausblenden im Leerlauf', 'mod.fade.after': 'Ganz verblasst nach',
+});
+FaviconModderUI.mount(el, { locale: 'de-AT' });          // de-AT → de → en → the schema's own text
+FaviconModderUI.mount(el, { messages: { 'ui.title': 'Your tab icon' } });
+```
+
+Keys: `ui.*` for the configurator, `mod.<type>` / `mod.<type>.help` for a mod, `mod.<type>.<option>` (and
+`.help`) for a field, `mod.<type>.<option>.<value>` for a choice, `mod.<type>.group.<group>` for a group
+heading. `FaviconModderUI.messages.en` and `.cs` list them all. A missing text falls back to English, then to
+the English label in the mod's schema — so a third-party mod is labelled without any translation.
+
+<br clear="right">
 
 ## Writing your own mod
 
-A mod is a plain object with any of these optional members:
+A mod is a plain object with any of these hooks:
 
 ```js
 const mod = {
-  name: 'badge',                         // for remove('badge') / get('badge')
-  prepare(state) {},                     // every render, before both stages (e.g. add to state.accents)
-  svg(doc, state) {},                    // vector stage: change the parsed SVG Document in place
-  canvas(ctx, state) {},                 // raster stage: ctx is the icon layer (2D context, size × size)
-  attach(controller) {},                 // start(): set up timers, listeners
-  detach() {},                           // stop() / remove(): tear them down
+  name: 'badge',                 // for remove('badge') / get('badge')
+  prepare(state) {},             // every render, first (e.g. state.accents.push(colour) — the fade keeps it)
+  svg(doc, state) {},            // vector stage: change the parsed SVG document in place
+  canvas(ctx, state) {},         // raster stage: ctx is the icon layer; state.layers.background is behind it
+  attach(controller) {},         // start(): timers, listeners …
+  detach() {},                   // stop() / remove(): … torn down
+  preview(time) {},              // optional: show yourself at 0–1 of your course
+  toConfig() { return {}; },     // optional: your options now (default: what the config gave you)
 };
-fm.use(mod);
+FaviconModder.create().use(mod).start();
 ```
 
-`state` carries `size`, `isSvg` (whether the source was an SVG), `controller`, `redraw()`, `accents` and,
-during the raster stage, `layers: { icon, background }` — two 2D contexts that are composed at the end, the
-icon over the background.
-
-`state.accents` is the list of colours that mark the instance, emptied at the start of every render. Each
-`recolor()` adds its `to` colour in `prepare()` — before the SVG stage, so the raster fade knows colours
-that were recoloured in the vector stage. The fade keeps them (`keep: 'recolored'`). A mod of your own
-adds to it the same way: `prepare(state) { state.accents.push('#ff6f00'); }`. The built-in `recolor`, `background` and `fade` are mods of exactly this shape
-(`FaviconModder.mods.*`).
-
-A dot for unread messages:
+**Register it with a schema** and it becomes configurable — `fromConfig()` builds it and the configurator
+shows it, labelled, with no change to the UI:
 
 ```js
-const unread = {
-  name: 'unread',
-  count: 0,
+FaviconModder.registerMod('dot', (o) => ({
+  name: 'dot',
   canvas(ctx, { size }) {
-    if (!this.count) return;
-    ctx.fillStyle = '#e53935';
+    ctx.fillStyle = o.color;
     ctx.beginPath();
-    ctx.arc(size * 0.78, size * 0.22, size * 0.2, 0, Math.PI * 2);
+    ctx.arc(size * 0.8, size * 0.2, size * o.radius, 0, Math.PI * 2);
     ctx.fill();
   },
-};
-fm.use(unread);
-unread.count = 3; fm.redraw();
+}), {
+  label: 'Dot', help: 'A dot in the top-right corner.',
+  options: [
+    { key: 'color', type: 'color', default: '#e53935', label: 'Colour' },
+    { key: 'radius', type: 'number', min: 0.05, max: 0.3, step: 0.01, percent: true, default: 0.18, label: 'Size' },
+  ],
+});
+
+FaviconModder.fromConfig({ mods: [{ type: 'dot', color: '#ff6f00' }] }).start();
 ```
 
-A mod that changes itself over time asks for a redraw through `state.redraw()` (or the controller it got
-in `attach`). Redraws are coalesced.
+Option schema fields: `key`, `type` (`color`, `number`, `select`, `boolean`, `colorList`, `text`),
+`default`, `label` / `help` (English fallbacks), `labelKey` / `helpKey` (other message keys), `group`,
+`min` / `max` / `step` / `unit`, `percent` (a 0–1 fraction shown in %), `nullable` (empty = automatic),
+`options: [{ value, label }]` (select), `tokens: [{ value, label }]` (words a colour list may hold, like
+`recolored`), `when: { otherKey: value }` (shown only then), `advanced` (under "More options"). Schema-level:
+`label`, `help`, `groups`, `single` (one per pipeline), `position: 'last'`. `FaviconModder.modTypes()` and
+`modSchema(type)` read the registry. The built-in `recolor`, `background` and `fade` are registered exactly
+this way.
 
-The pure helpers the built-in mods use are exported too: `parseColor`, `formatColor`, `colorMatcher`,
+The pure helpers the built-ins use are exported too: `parseColor`, `formatColor`, `colorMatcher`,
 `recolorCss`, `recolorSvgString`, `recolorSvgDoc`, `recolorPixels`, `fadePixels`, `resolveKeep`,
-`keepWeight`, `fadeLevel`, `nextFadeTick`. A fade of your own that keeps the tint:
+`keepWeight`, `fadeLevel`, `nextFadeTick`.
 
-```js
-const colors = FaviconModder.resolveKeep('recolored', state.accents);
-FaviconModder.fadePixels(img.data, 0.7, { saturation: 0, brightness: 0.55 }, { colors, tolerance: 48, strength: 1 });
-```
+## The code API, in short
+
+`FaviconModder.create(opts)` → controller, chainable: `recolor(from, to, opts)`, `background(color, opts)`
+(again = change live, `null` = remove), `fade(opts)` (`false` = remove), `use(mod)`, `remove(modOrName)`,
+`get(name)`, `onlyIf(boolOrFn)`, `start()`, `stop()`, `redraw()`, `setConfig()`, `toConfig()`,
+`preview()`. The fade also accepts `level` (a frozen 0–1 level) and `now` (a clock, for tests).
+`FaviconModder.enabled(key)` / `toggle(key, on)` are a one-switch localStorage opt-in, for when you do not
+need a whole config.
 
 ## Browser notes and limits
 
-- **Cross-origin icons.** An icon from another origin without CORS headers taints the canvas; the
-  library then leaves the icon as it is and logs one `console.warn`. Serve the icon from the page's
-  origin (or with `Access-Control-Allow-Origin`).
-- **Frozen and discarded tabs** do not run any script, so their icon does not update until they wake up.
-  Chrome freezes long-hidden tabs under memory pressure, mobile browsers often.
-- **Several icon links.** The first `<link rel~="icon">` is the one rewritten. When a page offers several
-  (sizes, `mask-icon`, `apple-touch-icon`), the browser may prefer another one; keep a single
-  `rel="icon"` link on pages that use this library.
-- **SVG without a `viewBox`** is drawn at its own `width`/`height`; with a `viewBox` it is scaled to `size`.
-- Safari shows favicons only in some places (tab bar, bookmarks) and may cache them; Firefox and
-  Chromium-based browsers update the tab icon at once.
-- The pipeline runs on a regular `<canvas>`; at 64 px a redraw is well under a millisecond of pixel work.
+- **Cross-origin icons** without CORS headers taint the canvas; the icon is then left as it is, with one
+  `console.warn`. Serve the icon from the page's origin.
+- **Frozen and discarded tabs** run no script, so their icon updates when they wake up.
+- **Several icon links**: the first `<link rel~="icon">` is rewritten; keep a single `rel="icon"` link on
+  pages that use the library, or the browser may prefer another one.
+- **SVG without a `viewBox`** is drawn at its own `width`/`height`; with one it is scaled to `size`.
+- Safari shows favicons in fewer places and caches them; Chromium browsers and Firefox update the tab icon
+  at once.
+- A redraw is a 64 px canvas — well under a millisecond of pixel work.
+- The configurator needs Shadow DOM and container queries (every current browser).
+
+## Playground
+
+`demo/index.html` is a playground on the configurator: preset cards (local, test, production, a 30-second
+idle fade) with their JSON, the configurator driving the tab's own icon, and the fade strip. ES modules do
+not load from `file://`, so serve the project folder and open `/demo/`:
+
+```bash
+python3 -m http.server 8000      # then http://localhost:8000/demo/
+npx serve .                       # or any static server
+```
+
+`?preset=test` loads a preset, `?lang=cs` switches the language.
 
 ## Develop
 
@@ -277,13 +339,9 @@ No Node or Bun is needed on the host — run everything in a container:
 
 ```bash
 docker run --rm -v "$PWD":/w -w /w oven/bun bun test              # unit tests
-docker run --rm -v "$PWD":/w -w /w oven/bun bun scripts/build.js  # dist/ (UMD + minified)
+docker run --rm -v "$PWD":/w -w /w oven/bun bun scripts/build.js  # dist/ (UMD + minified, core and UI)
 ```
-
-`demo/index.html` shows every mod with live controls and a fade strip (0–15 minutes idle, one icon a
-minute, for three instances at 32 and 16 px); serve the project folder over HTTP (ES modules do not
-load from `file://`) and open `/demo/`.
 
 ## Licence
 
-MIT — see [LICENSE](LICENSE).
+MIT — Copyright (c) 2026 jioolk. See [LICENSE](LICENSE).
