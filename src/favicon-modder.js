@@ -1,9 +1,9 @@
 /*!
- * favicon-modder 0.2.0 — redraw the page favicon through a pipeline of small mods.
- * MIT licence. Copyright (c) 2026 the favicon-modder authors.
+ * favicon-modder 0.3.0 — redraw the page favicon through a pipeline of small mods.
+ * MIT licence. Copyright (c) 2026 jioolk. https://github.com/jioolk/favicon-modder
  */
 
-const VERSION = '0.2.0';
+const VERSION = '0.3.0';
 
 /* ------------------------------------------------------------------ colours */
 
@@ -380,8 +380,10 @@ function recolor(from, to, opts = {}) {
   recolorArgs(from, to, 0); // fail early on a bad colour
   return {
     name: 'recolor',
+    type: 'recolor',
     from,
     to,
+    toConfig() { return { from, to, tolerance: opts.tolerance ?? null }; },
     prepare(state) { state.accents.push(to); }, // the fade keeps this colour (keep: 'recolored')
     svg(doc) { recolorSvgDoc(doc, from, to, opts.tolerance ?? 0); },
     canvas(ctx, state) {
@@ -417,8 +419,13 @@ function shapePath(ctx, shape, size, radius) {
 function background(color, opts = {}) {
   const mod = {
     name: 'background',
+    type: 'background',
     color,
     options: {},
+    toConfig() {
+      const { shape, radius, padding, opacity } = mod.options;
+      return { color: mod.color, shape, radius, padding, opacity };
+    },
     set(c, o = {}) {
       if (!parseColor(c)) throw new Error(`favicon-modder: not a colour: ${c}`);
       mod.color = c;
@@ -468,8 +475,10 @@ function fade(opts = {}) {
   let ticker = null;
   let last = 0;
   let lastSchedule = 0;
+  let previewTime = null;
   const mod = {
     name: 'fade',
+    type: 'fade',
     level: 0,
     options: {},
     set(o = {}) {
@@ -479,7 +488,25 @@ function fade(opts = {}) {
       };
       mod.options.to = { saturation: 0, brightness: 0.55, ...mod.options.to };
       resolveKeep(mod.options.keep, []); // fail early on a bad colour
+      if (previewTime != null) {
+        mod.options.level = fadeLevel(Math.round(previewTime * mod.options.after * 1000), mod.options);
+      }
       if (controller) mod.tick();
+    },
+    /** Show the fade as it is after `time` (0–1) of `after` idle, stepped like the real one; null = the clock. */
+    preview(time) {
+      previewTime = time;
+      mod.set({ level: null });
+    },
+    toConfig() {
+      const o = mod.options;
+      const keep = o.keep == null || o.keep === false ? [] : [].concat(o.keep);
+      const keepBackground = o.keepBackground === true ? o.keepStrength : Number(o.keepBackground) || 0;
+      return {
+        step: o.step, after: o.after, easing: typeof o.easing === 'string' ? o.easing : 'linear', target: o.target,
+        keep, tolerance: o.tolerance, keepStrength: o.keepStrength, keepBackground,
+        saturation: o.to.saturation, brightness: o.to.brightness,
+      };
     },
     /** idle milliseconds */
     idle() { return mod.options.now() - last; },
@@ -537,6 +564,276 @@ function fade(opts = {}) {
   return mod;
 }
 
+/* ------------------------------------------------- mod registry and configs */
+
+/**
+ * @typedef {object} OptionSchema  one option of a mod, as a config holds it and the configurator edits it
+ * @property {string} key  the option's name in the config
+ * @property {'color'|'number'|'select'|'boolean'|'colorList'|'text'} type
+ * @property {*} default  the value of a new mod, and of a missing or invalid option
+ * @property {string} [label]  English label (fallback when the UI has no message `mod.<type>.<key>`)
+ * @property {string} [help]  English help text (fallback for `mod.<type>.<key>.help`)
+ * @property {string} [labelKey] @property {string} [helpKey]  other message keys than the convention
+ * @property {string} [group]  fields of a group are shown together (message `group.<group>`)
+ * @property {number} [min] @property {number} [max] @property {number} [step] @property {string} [unit]
+ * @property {boolean} [percent]  a 0–1 fraction, shown as a percentage
+ * @property {boolean} [nullable]  number: null (an empty field) is allowed and means "automatic"
+ * @property {Array<{value: *, label?: string}>} [options]  select: the choices
+ * @property {Array<{value: string, label?: string}>} [tokens]  colorList: words allowed besides colours
+ * @property {Object<string, *|Array>} [when]  shown only while these other options have these values
+ * @property {boolean} [advanced]  the configurator shows it under "More options"
+ */
+
+/**
+ * @typedef {object} ModSchema
+ * @property {string} [label] @property {string} [help]  English fallbacks of `mod.<type>` / `mod.<type>.help`
+ * @property {boolean} [single]  at most one per pipeline (the configurator offers no second one)
+ * @property {'last'} [position]  the configurator adds other mods before this one
+ * @property {Object<string, string>} [groups]  English group labels
+ * @property {OptionSchema[]} options
+ */
+
+const CONFIG_VERSION = 1;
+const FIELD_TYPES = ['color', 'number', 'select', 'boolean', 'colorList', 'text'];
+const REGISTRY = new Map();
+const MIGRATIONS = new Map();
+const clone = (v) => (v == null || typeof v !== 'object' ? v : JSON.parse(JSON.stringify(v)));
+
+/**
+ * Register a mod type, so configs can name it and the configurator can show it.
+ * @param {string} type  the `type` of a config entry
+ * @param {function(object): Mod} factory  gets the options, already checked against the schema
+ * @param {ModSchema} [schema]
+ */
+function registerMod(type, factory, schema = {}) {
+  if (!/^[a-z][\w-]*$/i.test(String(type))) throw new Error(`favicon-modder: bad mod type: ${type}`);
+  if (typeof factory !== 'function') throw new Error(`favicon-modder: the factory of "${type}" is not a function`);
+  const options = (schema.options || []).map((o) => {
+    if (!o || !o.key || !FIELD_TYPES.includes(o.type)) throw new Error(`favicon-modder: bad option schema in "${type}"`);
+    return Object.freeze({ ...o });
+  });
+  REGISTRY.set(type, { factory, schema: Object.freeze({ ...schema, type, options: Object.freeze(options) }) });
+}
+
+/** The schema of a registered mod type. @param {string} type @returns {ModSchema|undefined} */
+function modSchema(type) { return REGISTRY.get(type)?.schema; }
+
+/** The registered mod types, in registration order. @returns {string[]} */
+function modTypes() { return [...REGISTRY.keys()]; }
+
+/**
+ * Add a config migration: `fn` turns a config of version `from` into one of version `from + 1`.
+ * @param {number} from @param {function(object): object} fn
+ */
+function registerMigration(from, fn) { MIGRATIONS.set(from, fn); }
+
+const BAD = Symbol('bad');
+
+// one value checked against its option schema: the value to use, or BAD
+function checkValue(field, v) {
+  switch (field.type) {
+    case 'color':
+      return typeof v === 'string' && parseColor(v) ? v.trim() : BAD;
+    case 'number': {
+      if ((v === null || v === '') && field.nullable) return null;
+      const n = typeof v === 'boolean' ? Number(v) : typeof v === 'string' && v.trim() ? Number(v) : v;
+      if (typeof n !== 'number' || !Number.isFinite(n)) return BAD;
+      return clamp(n, field.min ?? -Infinity, field.max ?? Infinity);
+    }
+    case 'select': {
+      const hit = (field.options || []).find((o) => o.value === v || String(o.value) === String(v));
+      return hit ? hit.value : BAD;
+    }
+    case 'boolean':
+      if (typeof v === 'boolean') return v;
+      if (v === 1 || v === 'true' || v === 'on' || v === '1') return true;
+      if (v === 0 || v === 'false' || v === 'off' || v === '0') return false;
+      return BAD;
+    case 'colorList': {
+      if (v == null || v === false) return [];
+      const tokens = (field.tokens || []).map((t) => t.value);
+      const list = Array.isArray(v) ? v : [v];
+      return list.every((c) => tokens.includes(c) || (typeof c === 'string' && parseColor(c)))
+        ? [...new Set(list.map((c) => c.trim()))] : BAD;
+    }
+    default:
+      return v == null ? BAD : String(v);
+  }
+}
+
+// a config entry's options against the schema: { values, extra } (extra: options this version does not know)
+function checkOptions(type, schema, entry, warnings) {
+  const values = {};
+  const extra = {};
+  for (const field of schema.options) {
+    if (!(field.key in entry) || entry[field.key] === undefined) { values[field.key] = clone(field.default); continue; }
+    const v = checkValue(field, entry[field.key]);
+    if (v === BAD) warnings.push(`${type}.${field.key}: ${JSON.stringify(entry[field.key])} is not valid, the default is used`);
+    values[field.key] = v === BAD ? clone(field.default) : v;
+  }
+  for (const k of Object.keys(entry)) {
+    if (k === 'type' || schema.options.some((f) => f.key === k)) continue;
+    extra[k] = clone(entry[k]);
+    warnings.push(`${type}.${k}: unknown option, kept but not applied`);
+  }
+  return { values, extra };
+}
+
+/** The config of a new install: on, 64 px, an idle fade that keeps the recoloured tint. */
+function defaultConfig() {
+  return normalizeConfig({ version: CONFIG_VERSION, enabled: true, size: 64, mods: [{ type: 'fade' }] }).config;
+}
+
+/**
+ * Check a config (an object or JSON text): migrate it to the current version, fill missing options with their
+ * defaults, replace invalid values by the defaults. Unknown mod types and unknown options are kept (so an
+ * older app does not erase what a newer one stored) but not applied; each is reported in `warnings`.
+ * @param {object|string} input
+ * @returns {{config: object, warnings: string[]}}
+ */
+function normalizeConfig(input) {
+  const warnings = [];
+  let c = input;
+  if (typeof c === 'string') {
+    try { c = JSON.parse(c); } catch { warnings.push('the config is not valid JSON; the default is used'); c = null; }
+  }
+  if (!c || typeof c !== 'object' || Array.isArray(c)) {
+    if (c != null) warnings.push('the config is not an object; the default is used');
+    c = { mods: [{ type: 'fade' }] };
+  }
+  c = clone(c);
+  let version = Number.isInteger(c.version) ? c.version : CONFIG_VERSION;
+  while (version < CONFIG_VERSION) {
+    const migrate = MIGRATIONS.get(version);
+    if (migrate) c = migrate(c) || c;
+    version += 1;
+  }
+  if (version > CONFIG_VERSION) {
+    warnings.push(`config version ${version} is newer than this library's ${CONFIG_VERSION}; read as far as understood`);
+  }
+  const config = {
+    version,
+    enabled: c.enabled !== false,
+    size: Number.isFinite(Number(c.size)) && c.size != null ? clamp(Math.round(Number(c.size)), 16, 512) : 64,
+    mods: [],
+  };
+  for (const k of Object.keys(c)) {
+    if (!['version', 'enabled', 'size', 'mods'].includes(k)) {
+      config[k] = c[k];
+      warnings.push(`${k}: unknown option, kept but not applied`);
+    }
+  }
+  if (c.mods != null && !Array.isArray(c.mods)) warnings.push('mods is not a list; ignored');
+  for (const entry of Array.isArray(c.mods) ? c.mods : []) {
+    if (!entry || typeof entry !== 'object' || typeof entry.type !== 'string') {
+      warnings.push(`a mod without a type is ignored: ${JSON.stringify(entry)}`);
+      continue;
+    }
+    const reg = REGISTRY.get(entry.type);
+    if (!reg) {
+      warnings.push(`unknown mod type "${entry.type}", kept but not applied`);
+      config.mods.push(entry);
+      continue;
+    }
+    const { values, extra } = checkOptions(entry.type, reg.schema, entry, warnings);
+    config.mods.push({ type: entry.type, ...values, ...extra });
+  }
+  return { config, warnings };
+}
+
+// a mod from one (normalised) config entry; an unknown type becomes an inert placeholder that keeps the entry
+function buildMod(entry) {
+  const reg = REGISTRY.get(entry.type);
+  const inert = () => ({ name: entry.type, type: entry.type, unknown: true, toConfig: () => clone(entry) });
+  if (!reg) return inert();
+  const { values, extra } = checkOptions(entry.type, reg.schema, entry, []);
+  let mod;
+  try {
+    mod = reg.factory(clone(values));
+  } catch (e) {
+    warnOnce(`the mod "${entry.type}" cannot be built from its config; it is skipped`, e);
+    return inert();
+  }
+  mod.type = entry.type;
+  if (!mod.toConfig) mod.config = values;
+  mod.configExtra = extra;
+  return mod;
+}
+
+// what a mod's config entry is now (its live options), or null for a mod that is not configurable
+function modConfig(mod) {
+  if (!mod || !mod.type) return null;
+  if (mod.unknown) return mod.toConfig();
+  const own = mod.toConfig ? mod.toConfig() : mod.config || {};
+  return { type: mod.type, ...(mod.configExtra || {}), ...own };
+}
+
+/* ------------------------------------------------------------- built-in schemas */
+
+const PCT = { type: 'number', min: 0, max: 1, step: 0.01, percent: true };
+
+registerMod('recolor', (o) => recolor(o.from, o.to, o.tolerance == null ? {} : { tolerance: o.tolerance }), {
+  label: 'Recolour',
+  help: 'Replaces one colour of the logo — draw the part that varies in a marker colour used nowhere else.',
+  options: [
+    { key: 'from', type: 'color', default: '#00b140', label: 'Colour in the logo' },
+    { key: 'to', type: 'color', default: '#d32f2f', label: 'New colour' },
+    {
+      key: 'tolerance', type: 'number', min: 0, max: 255, step: 1, nullable: true, default: null, label: 'Tolerance', advanced: true,
+      help: 'Per RGB channel, 0–255. Empty = automatic: exact for SVG icons, 32 for raster icons.',
+    },
+  ],
+});
+
+registerMod('background', (o) => background(o.color, { shape: o.shape, radius: o.radius, padding: o.padding, opacity: o.opacity }), {
+  label: 'Background',
+  help: 'A shape behind a transparent icon; the icon shrinks to fit.',
+  single: true,
+  options: [
+    { key: 'color', type: 'color', default: '#e8f5e9', label: 'Colour' },
+    {
+      key: 'shape', type: 'select', default: 'rounded', label: 'Shape',
+      options: [{ value: 'square', label: 'Square' }, { value: 'rounded', label: 'Rounded square' }, { value: 'circle', label: 'Circle' }],
+    },
+    { key: 'radius', ...PCT, max: 0.5, default: 0.22, label: 'Corner radius', when: { shape: 'rounded' } },
+    { key: 'padding', ...PCT, max: 0.45, default: 0.1, label: 'Padding', help: 'Space around the icon, a share of its size.' },
+    { key: 'opacity', ...PCT, default: 1, label: 'Opacity' },
+  ],
+});
+
+registerMod('fade', (o) => fade({ ...o, to: { saturation: o.saturation, brightness: o.brightness } }), {
+  label: 'Idle fade',
+  help: 'A tab you have not looked at turns grey and dark, step by step; it is back in full colour when you return.',
+  single: true,
+  position: 'last',
+  groups: { timing: 'Timing', look: 'Fully faded', keep: 'What stays' },
+  options: [
+    { key: 'step', type: 'number', min: 1, max: 600, step: 1, unit: 's', default: 60, label: 'Step', group: 'timing', help: 'Seconds between two fade steps.' },
+    { key: 'after', type: 'number', min: 10, max: 7200, step: 10, unit: 's', default: 900, label: 'Fully faded after', group: 'timing' },
+    {
+      key: 'easing', type: 'select', default: 'linear', label: 'Curve', group: 'timing', advanced: true,
+      options: [
+        { value: 'linear', label: 'Even' }, { value: 'ease-in', label: 'Slow start' },
+        { value: 'ease-out', label: 'Fast start' }, { value: 'ease-in-out', label: 'Slow – fast – slow' },
+      ],
+    },
+    {
+      key: 'target', type: 'select', default: 'all', label: 'What fades', group: 'look',
+      options: [{ value: 'all', label: 'Everything' }, { value: 'icon', label: 'The logo only' }, { value: 'background', label: 'The background only' }],
+    },
+    { key: 'saturation', ...PCT, default: 0, label: 'Saturation', group: 'look', advanced: true },
+    { key: 'brightness', ...PCT, default: 0.55, label: 'Brightness', group: 'look', advanced: true },
+    {
+      key: 'keep', type: 'colorList', default: ['recolored'], label: 'Colours that stay', group: 'keep',
+      help: 'They do not fade, so an idle tab still shows its instance colour.',
+      tokens: [{ value: 'recolored', label: 'The recoloured colours' }],
+    },
+    { key: 'keepBackground', ...PCT, default: 0, label: 'Background stays', group: 'keep', help: 'Keep the background colour too, wholly (100 %) or partly.' },
+    { key: 'tolerance', type: 'number', min: 0, max: 128, step: 1, default: 48, label: 'Match tolerance', group: 'keep', advanced: true },
+    { key: 'keepStrength', ...PCT, default: 1, label: 'How much they stay', group: 'keep', advanced: true },
+  ],
+});
+
 /* --------------------------------------------------------------- controller */
 
 const warned = new Set();
@@ -571,11 +868,17 @@ class Modder {
    *   target: where the result goes (default the page's icon link; an `<img>` gets its `src`)
    */
   constructor(opts = {}) {
+    this._sizeGiven = opts.size != null; // a config's size applies only when the caller set none
     this.options = { source: 'auto', size: 64, ...opts };
     /** @type {Mod[]} in pipeline order */
     this.mods = [];
     this.running = false;
     this.condition = true;
+    this._enabled = true; // the config's `enabled`
+    this._wanted = false; // start() was called (and stop() was not)
+    this._preview = null;
+    this._configExtra = {};
+    this._configVersion = CONFIG_VERSION;
     this.state = {
       size: this.options.size, isSvg: false, layers: null, accents: [], controller: this, redraw: () => this.redraw(),
     };
@@ -584,6 +887,7 @@ class Modder {
   /** Add a mod at the end of the pipeline. @param {Mod} mod @returns {this} */
   use(mod) {
     this.mods.push(mod);
+    if (this._preview != null) mod.preview?.(this._preview);
     if (this.running) mod.attach?.(this);
     this.redraw();
     return this;
@@ -622,9 +926,61 @@ class Modder {
   /** Start only when `cond` (a boolean or a function asked at start()) is true. @returns {this} */
   onlyIf(cond) { this.condition = cond; return this; }
 
-  /** Take over the icon and draw it. A no-op when onlyIf() says no. @returns {this} */
+  /**
+   * Apply a config (see `normalizeConfig()`): the mods that came from a config or carry a `type` are replaced
+   * by the config's, mods added with use() without a type stay after them. Live: a running controller
+   * redraws, stops when the config says `enabled: false` and starts again when it says true.
+   * @param {object|string} config @returns {this}
+   */
+  setConfig(config) {
+    const { config: c, warnings } = normalizeConfig(config);
+    if (warnings.length) warnOnce(`config: ${warnings.join('; ')}`);
+    const old = this.mods.filter((m) => m.type);
+    if (this.running) old.forEach((m) => m.detach?.());
+    const built = c.mods.map(buildMod);
+    if (this._preview != null) built.forEach((m) => m.preview?.(this._preview));
+    this.mods = [...built, ...this.mods.filter((m) => !m.type)];
+    if (!this._sizeGiven) this.options.size = c.size;
+    this._configVersion = c.version;
+    this._configExtra = Object.fromEntries(Object.entries(c).filter(([k]) => !['version', 'enabled', 'size', 'mods'].includes(k)));
+    this._enabled = c.enabled;
+    if (this.running && !c.enabled) this._halt();
+    else if (this.running) { built.forEach((m) => m.attach?.(this)); this.redraw(); } else if (this._wanted) this.start();
+    return this;
+  }
+
+  /**
+   * The pipeline as a config: `{ version, enabled, size, mods: [...] }`. Mods without a `type` (custom
+   * objects added with use()) are not part of it.
+   * @returns {object}
+   */
+  toConfig() {
+    const raw = {
+      version: Math.max(this._configVersion, CONFIG_VERSION),
+      enabled: this._enabled,
+      size: this.options.size,
+      mods: this.mods.map(modConfig).filter(Boolean),
+      ...this._configExtra,
+    };
+    return normalizeConfig(raw).config;
+  }
+
+  /**
+   * Freeze time-dependent mods at a point of their course, for previews: `time` 0–1 (the fade: that share
+   * of `after` idle), or null to give them back their clock. Mods take it through their `preview(time)` hook.
+   * @param {number|null} time @returns {this}
+   */
+  preview(time) {
+    this._preview = time == null ? null : clamp(Number(time) || 0, 0, 1);
+    this.mods.forEach((m) => m.preview?.(this._preview));
+    return this;
+  }
+
+  /** Take over the icon and draw it. A no-op when onlyIf() or the config's `enabled` says no. @returns {this} */
   start() {
     if (this.running || typeof document === 'undefined') return this;
+    this._wanted = true;
+    if (!this._enabled) return this;
     if (!(typeof this.condition === 'function' ? this.condition() : this.condition)) return this;
     let target = this.options.target;
     let created = false;
@@ -638,8 +994,12 @@ class Modder {
     }
     const attr = target.localName === 'img' ? 'src' : 'href';
     this._target = { el: target, attr, created, value: target.getAttribute(attr), type: target.getAttribute('type') };
-    const source = this.options.source === 'auto' ? (created ? '/favicon.ico' : target[attr]) : this.options.source;
+    // another controller on the same link leaves the original there: draw from that, not from its result
+    const marked = target.getAttribute('data-favicon-modder-source');
+    const source = this.options.source === 'auto' ? (created ? '/favicon.ico' : marked || target[attr]) : this.options.source;
     this._sourceUrl = new URL(source, document.baseURI).href;
+    this._target.marked = marked;
+    target.setAttribute('data-favicon-modder-source', this._sourceUrl);
     this._source = null;
     this.running = true;
     this.mods.forEach((m) => m.attach?.(this));
@@ -649,6 +1009,11 @@ class Modder {
 
   /** Detach every mod and restore the original icon. @returns {this} */
   stop() {
+    this._wanted = false;
+    return this._halt();
+  }
+
+  _halt() {
     if (!this.running) return this;
     this.running = false;
     this.mods.forEach((m) => m.detach?.());
@@ -657,6 +1022,7 @@ class Modder {
     else {
       t.value == null ? t.el.removeAttribute(t.attr) : t.el.setAttribute(t.attr, t.value);
       if (t.attr === 'href') t.type == null ? t.el.removeAttribute('type') : t.el.setAttribute('type', t.type);
+      t.marked == null ? t.el.removeAttribute('data-favicon-modder-source') : t.el.setAttribute('data-favicon-modder-source', t.marked);
     }
     this._lastUrl = null;
     return this;
@@ -750,6 +1116,16 @@ class Modder {
 function create(opts) { return new Modder(opts); }
 
 /**
+ * Build a controller from a config — a plain JSON object, e.g. one stored per user:
+ * `{ version: 1, enabled: true, size: 64, mods: [{ type: 'recolor', from, to }, { type: 'fade', after: 900 }] }`.
+ * Unknown mod types and options are kept but not applied, with one console warning. Call `start()` on the
+ * result; with `enabled: false` it does nothing. The config's `size` applies unless `opts.size` is given.
+ * @param {object|string} config @param {{source?: string, size?: number, target?: HTMLLinkElement|HTMLImageElement}} [opts]
+ * @returns {Modder}
+ */
+function fromConfig(config, opts) { return new Modder(opts).setConfig(config); }
+
+/**
  * The per-user opt-in switch in localStorage ("1", "true" or "on" means on).
  * @param {string} [key='favicon-modder'] @returns {boolean}
  */
@@ -768,7 +1144,8 @@ function toggle(key = 'favicon-modder', on = undefined) {
 }
 
 const FaviconModder = {
-  version: VERSION, create, enabled, toggle, Modder,
+  version: VERSION, configVersion: CONFIG_VERSION, create, fromConfig, enabled, toggle, Modder,
+  registerMod, modSchema, modTypes, registerMigration, normalizeConfig, defaultConfig,
   mods: { recolor, background, fade },
   parseColor, formatColor, colorMatcher, recolorCss, recolorSvgString, recolorSvgDoc,
   recolorPixels, fadePixels, resolveKeep, keepWeight, fadeLevel, nextFadeTick,
@@ -776,7 +1153,8 @@ const FaviconModder = {
 
 export default FaviconModder;
 export {
-  VERSION as version, create, enabled, toggle, Modder, recolor, background, fade,
+  VERSION as version, CONFIG_VERSION as configVersion, create, fromConfig, enabled, toggle, Modder,
+  registerMod, modSchema, modTypes, registerMigration, normalizeConfig, defaultConfig, recolor, background, fade,
   parseColor, formatColor, colorMatcher, recolorCss, recolorSvgString, recolorSvgDoc,
   recolorPixels, fadePixels, resolveKeep, keepWeight, fadeLevel, nextFadeTick,
 };
